@@ -1470,38 +1470,63 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 await query.answer("This button is not for you.", show_alert=True)
                 return
 
-            # Get bot's username to create a deep link to the private chat
-            bot_username = (await context.bot.get_me()).username
-            deep_link = f"https://t.me/{bot_username}?start=movie_{movie_id}"
+            # --- ⭐️ NEW LOGIC STARTS HERE ⭐️ ---
+            # Try to send the movie directly instead of sending a deep link
+            try:
+                # 1. Fetch the movie data
+                conn = get_db_connection()
+                if not conn:
+                    await query.edit_message_text("❌ Database error. Please try again.")
+                    return
+                    
+                cur = conn.cursor()
+                cur.execute("SELECT title, url, file_id FROM movies WHERE id = %s", (movie_id,))
+                movie_data = cur.fetchone()
+                cur.close()
+                conn.close()
 
-            keyboard = InlineKeyboardMarkup([[
-                InlineKeyboardButton("🤖 Start Chat & Get Movie", url=deep_link)
-            ]])
+                if movie_data:
+                    title, url, file_id = movie_data
+                    
+                    # 2. Create a dummy Update object for send_movie_to_user
+                    # We use 'original_user_id' as the chat_id
+                    dummy_update = Update(update_id=0, message=telegram.Message(message_id=0, date=datetime.now(), chat=telegram.Chat(id=original_user_id, type='private')))
+                    
+                    # 3. Call the function to send the movie to the user's PM
+                    await send_movie_to_user(dummy_update, context, movie_id, title, url, file_id)
 
-            # Edit the original message in the group to provide the private chat link
-            await query.edit_message_text(
-                "Great! Click the button below to go to our private chat, and I'll send you the movie.",
-                reply_markup=keyboard
-            )
+                    # 4. Edit the message in the group to confirm
+                    await query.edit_message_text(f"✅ I have sent '{title}' to you in our private chat!")
+                
+                else:
+                    await query.edit_message_text("❌ Sorry, I couldn't find that movie's data.")
+            
+            except telegram.error.Forbidden:
+                # This error means the user has BLOCKED the bot or NEVER started a chat.
+                # NOW we use the deep link as a fallback.
+                bot_username = (await context.bot.get_me()).username
+                # We still include the movie_id in the deep link
+                deep_link = f"https://t.me/{bot_username}?start=movie_{movie_id}" 
+                keyboard = InlineKeyboardMarkup([[
+                    InlineKeyboardButton("🤖 1. Start Chat With Me", url=deep_link),
+                    InlineKeyboardButton("🔄 2. Click Here After Starting", callback_data=query.data) # Button to retry
+                ]])
+                
+                await query.edit_message_text(
+                    "❌ **I can't send you messages!**\n\n"
+                    "Please **start a chat with me privately first** (click Button 1), then come back and click Button 2 to get your movie.",
+                    reply_markup=keyboard
+                )
+            
+            except Exception as e:
+                logger.error(f"Error in group_get direct send: {e}")
+                await query.edit_message_text("❌ An error occurred while trying to send the file.")
+            
             return
+            # --- ⭐️ NEW LOGIC ENDS HERE ⭐️ ---
 
         # Handle movie selection (Now prompts for quality)
         if query.data.startswith("movie_"):
-            movie_id = int(query.data.replace("movie_", ""))
-
-            # Get movie title
-            conn = get_db_connection()
-            cur = conn.cursor()
-            cur.execute("SELECT id, title FROM movies WHERE id = %s", (movie_id,))
-            movie = cur.fetchone()
-            cur.close()
-            conn.close()
-
-            if not movie:
-                await query.edit_message_text("❌ Movie not found in database.")
-                return
-
-            movie_id, title = movie
 
             # Fetch all available qualities from movie_files table
             qualities = get_all_movie_qualities(movie_id)
