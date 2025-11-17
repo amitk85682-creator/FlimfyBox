@@ -1422,11 +1422,7 @@ async def group_message_handler(update: Update, context: ContextTypes.DEFAULT_TY
         if score > 90:
             movie_id, title, _, _ = movies_found[0]
 
-            # To avoid spamming, check if this user was prompted for this movie recently
-            prompt_key = f"prompt_{user.id}_{movie_id}"
-            now = datetime.now()
-            last_prompt_time = context.chat_data.get(prompt_key)
-
+            
             if last_prompt_time and (now - last_prompt_time) < timedelta(minutes=10):
                 logger.info(f"Skipping prompt for user {user.id} for movie {movie_id} due to recent prompt.")
                 return  # Don't prompt again so soon
