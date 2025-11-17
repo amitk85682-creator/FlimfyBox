@@ -71,8 +71,7 @@ ADMIN_CHANNEL_ID = os.environ.get('ADMIN_CHANNEL_ID')
 # Rate limiting dictionary
 user_last_request = defaultdict(lambda: datetime.min) # FIX 2: Removed duplicate definition
 
-# ===== New / Configurable rate-limiting and fuzzy 
-settings =====
+# ===== New / Configurable rate-limiting and fuzzy settings =====
 REQUEST_COOLDOWN_MINUTES = int(os.environ.get('REQUEST_COOLDOWN_MINUTES', '10'))  # per-user cooldown for same/similar movie
 SIMILARITY_THRESHOLD = int(os.environ.get('SIMILARITY_THRESHOLD', '80'))        # fuzzy similarity % to consider titles "same"
 MAX_REQUESTS_PER_MINUTE = int(os.environ.get('MAX_REQUESTS_PER_MINUTE', '10'))  # burst limit per user
