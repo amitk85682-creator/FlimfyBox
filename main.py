@@ -10,8 +10,9 @@ import os
 import threading
 import asyncio
 import logging
-import random # FIX 1: Added import random
+import random
 import json
+import requests
 import signal
 import sys
 import re
@@ -38,6 +39,14 @@ from datetime import datetime, timedelta
 from fuzzywuzzy import process, fuzz
 from urllib.parse import urlparse, urlunparse, quote
 from collections import defaultdict
+
+# prefer db_utils' fixed URL if it exists (kept at top as user suggested)
+try:
+    # prefer db_utils' fixed URL if it exists
+    import db_utils
+    FIXED_DATABASE_URL = getattr(db_utils, "FIXED_DATABASE_URL", None)
+except Exception:
+    FIXED_DATABASE_URL = None
 
 # ==================== LOGGING SETUP ====================
 logging.basicConfig(
