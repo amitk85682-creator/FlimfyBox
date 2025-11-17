@@ -2984,13 +2984,13 @@ def main():
 
     # Conversation handler for user interaction flow in private chat
     conv_handler = ConversationHandler(
-        entry_points=[CommandHandler('start', start)],
+        entry_points=[CommandHandler('start', start, filters=filters.ChatType.PRIVATE)], # <--- यहाँ फिल्टर जोड़ें
         states={
-            MAIN_MENU: [MessageHandler(filters.TEXT & ~filters.COMMAND, main_menu)],
-            SEARCHING: [MessageHandler(filters.TEXT & ~filters.COMMAND, search_movies)],
-            REQUESTING: [MessageHandler(filters.TEXT & ~filters.COMMAND, request_movie)],
+            MAIN_MENU: [MessageHandler(filters.TEXT & ~filters.COMMAND & filters.ChatType.PRIVATE, main_menu)], # <--- यहाँ फिल्टर जोड़ें
+            SEARCHING: [MessageHandler(filters.TEXT & ~filters.COMMAND & filters.ChatType.PRIVATE, search_movies)], # <--- यहाँ फिल्टर जोड़ें
+            REQUESTING: [MessageHandler(filters.TEXT & ~filters.COMMAND & filters.ChatType.PRIVATE, request_movie)], # <--- यहाँ फिल्टर जोड़ें
         },
-        fallbacks=[CommandHandler('cancel', cancel)],
+        fallbacks=[CommandHandler('cancel', cancel, filters=filters.ChatType.PRIVATE)], # <--- यहाँ फिल्टर जोड़ें
         per_message=False,
         per_chat=True,
     )
