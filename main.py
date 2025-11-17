@@ -12,7 +12,6 @@ import asyncio
 import logging
 import random # FIX 1: Added import random
 import json
-import requests
 import signal
 import sys
 import re
