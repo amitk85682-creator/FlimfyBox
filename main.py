@@ -477,8 +477,15 @@ def get_movies_from_db(user_query, limit=10):
         # Use fuzzy matching
         matches = process.extract(user_query, movie_titles, scorer=fuzz.token_sort_ratio, limit=limit)
 
-        # Filter matches with score >= 65
-        filtered_movies = [movie_dict[title] for title, score, index in matches if score >= 65]
+        # Filter matches with score >= 65, with a safe unpacking
+filtered_movies = []
+for match in matches:
+    # The match can be a 2-tuple (title, score) or 3-tuple (title, score, key)
+    # This check prevents the unpacking error.
+    if len(match) >= 2:
+        title, score = match[0], match[1]
+        if score >= 65 and title in movie_dict:
+            filtered_movies.append(movie_dict[title])
 
         logger.info(f"Found {len(filtered_movies)} fuzzy matches")
 
