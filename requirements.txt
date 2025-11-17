@@ -21,3 +21,4 @@ result
 citation
 packaging>=24.0
 python-telegram-bot[job-queue]
+requests
