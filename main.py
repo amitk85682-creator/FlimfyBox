@@ -1419,15 +1419,12 @@ async def group_message_handler(update: Update, context: ContextTypes.DEFAULT_TY
         score = fuzz.token_sort_ratio(_normalize_title_for_match(message_text), _normalize_title_for_match(match_title))
 
         # Use a high confidence threshold for group prompts
-        if score > 90:
+        if score > 85: # (हमने इसे 85 कर दिया था, आप चाहें तो 90 रख सकते हैं)
             movie_id, title, _, _ = movies_found[0]
 
-            
-            if last_prompt_time and (now - last_prompt_time) < timedelta(minutes=10):
-                logger.info(f"Skipping prompt for user {user.id} for movie {movie_id} due to recent prompt.")
-                return  # Don't prompt again so soon
-
-            context.chat_data[prompt_key] = now
+            # <<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<
+            # हमने यहां से 10-मिनट के कूलडाउन वाला पूरा कोड ब्लॉक हटा दिया है।
+            # >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
 
             keyboard = InlineKeyboardMarkup([[
                 InlineKeyboardButton("✅ Yes, get this movie", callback_data=f"group_get_{movie_id}_{user.id}")
@@ -1444,7 +1441,6 @@ async def group_message_handler(update: Update, context: ContextTypes.DEFAULT_TY
             asyncio.create_task(
                 delete_messages_after_delay(context, update.effective_chat.id, [reply_msg.message_id], delay=120)
             )
-
 
 async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Handle inline button callbacks - INCLUDING MOVIE SELECTION"""
