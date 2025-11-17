@@ -1,0 +1,81 @@
+<!doctype html>
+<html>
+<head>
+    <meta charset="utf-8">
+    <title>Admin - Add Movie</title>
+    <style>
+        body { font-family: Arial, sans-serif; background:#0f0f0f; color:#eee; padding:20px; margin:0; }
+        .wrap { max-width:900px; margin:20px auto; background:#1e1e1e; padding:22px; border-radius:8px; }
+        input, textarea { width:100%; padding:10px; margin-top:8px; border-radius:6px; border:1px solid #333; background:#0f0f0f; color:#fff; }
+        label { display:block; margin-top:12px; color:#bbb; }
+        .qualities { display:grid; grid-template-columns:1fr 1fr; gap:12px; margin-top:8px; }
+        .actions { display:flex; gap:12px; margin-top:18px; }
+        button { padding:10px 16px; border-radius:999px; border:none; background:#00d4ff; color:#111; font-weight:bold; cursor:pointer; }
+        .flash { padding:8px; margin-bottom:10px; border-radius:6px; background:#2a2a2a; border:1px solid #444; color:#fff; }
+        small { color:#999; }
+    </style>
+</head>
+<body>
+    <div class="wrap">
+        <h2>Add / Update Movie</h2>
+        {% with messages = get_flashed_messages(with_categories=true) %}
+          {% if messages %}
+            {% for category, message in messages %}
+              <div class="flash">{{ message }}</div>
+            {% endfor %}
+          {% endif %}
+        {% endwith %}
+
+        <form method="post" action="{{ url_for('admin.add_movie_post') }}">
+            <label>Movie / Web Series Name</label>
+            <input name="title" type="text" required placeholder="Example: Kalki 2898 AD">
+
+            <label>Description</label>
+            <textarea name="description" rows="3" placeholder="Brief plot..."></textarea>
+
+            <label>Download Links / File IDs (fill one or more)</label>
+<div class="qualities">
+    <div>
+        <small>360p (Low)</small>
+        <input name="q_360" type="text" placeholder="360p link or file id">
+    </div>
+    <div>
+        <small>480p (SD)</small>
+        <input name="q_480" type="text" placeholder="480p link or file id">
+    </div>
+    <div>
+        <small>720p (Standard)</small>
+        <input name="q_720" type="text" placeholder="720p link or file id">
+    </div>
+    <div>
+        <small>1080p (HD)</small>
+        <input name="q_1080" type="text" placeholder="1080p link or file id">
+    </div>
+    <div>
+        <small>2160p (4K)</small>
+        <input name="q_2160" type="text" placeholder="4K link or file id">
+    </div>
+</div>
+
+            <label>Aliases (comma separated)</label>
+            <input name="aliases" type="text" placeholder="e.g. Kalki, Kalki Movie">
+
+            <div class="actions">
+                <button type="submit">Add / Update</button>
+                <a href="{{ url_for('admin.bulk_upload') }}"><button type="button">Bulk Upload CSV</button></a>
+                <a href="{{ url_for('admin.logout') }}"><button type="button">Logout</button></a>
+            </div>
+        </form>
+
+        <hr style="margin:20px 0; border-color:#222;">
+        <h3>Bulk upload CSV</h3>
+        <p>CSV columns: Title,Description,URL_360,URL_480,URL_720,URL_1080,URL_2160,Aliases</p>
+        <form method="post" action="{{ url_for('admin.bulk_upload') }}" enctype="multipart/form-data">
+            <input type="file" name="csvfile" accept=".csv" required>
+            <div style="margin-top:12px;">
+                <button type="submit">Upload CSV</button>
+            </div>
+        </form>
+    </div>
+</body>
+</html>
