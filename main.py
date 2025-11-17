@@ -485,8 +485,33 @@ def get_movies_from_db(user_query, limit=10):
         # Use fuzzy matching
         matches = process.extract(user_query, movie_titles, scorer=fuzz.token_sort_ratio, limit=limit)
 
-        # Filter matches with score >= 65
-        filtered_movies = [movie_dict[title] for title, score, index in matches if score >= 65]
+        # matches can be either (choice, score) or (choice, score, idx) depending on version
+        filtered_movies = []
+        for item in matches:
+            # Normalize item length
+            if not item:
+                continue
+            if len(item) == 3:
+                title, score, _ = item
+            elif len(item) == 2:
+                title, score = item
+            else:
+                # unexpected shape; skip
+                logger.debug(f"Unexpected match shape: {item}")
+                continue
+
+            try:
+                score_val = int(score)
+            except Exception:
+                # If score isn't int-like, try to coerce or skip
+                try:
+                    score_val = int(float(score))
+                except Exception:
+                    logger.debug(f"Non-numeric score in match: {item}")
+                    continue
+
+            if score_val >= 65 and title in movie_dict:
+                filtered_movies.append(movie_dict[title])
 
         logger.info(f"Found {len(filtered_movies)} fuzzy matches")
 
@@ -503,7 +528,6 @@ def get_movies_from_db(user_query, limit=10):
                 conn.close()
             except:
                 pass
-
 # ==================== STORE USER REQUEST (fixed) ====================
 def store_user_request(user_id, username, first_name, movie_title, group_id=None, message_id=None):
     """Store user request in database. Uses ON CONFLICT DO UPDATE to refresh timestamp for exact duplicates."""
