@@ -1067,42 +1067,55 @@ async def send_movie_to_user(update: Update, context: ContextTypes.DEFAULT_TYPE,
             logger.error(f"Secondary send error: {e2}")
 
 # ==================== TELEGRAM BOT HANDLERS ====================
+
+# --- NEW HELPER FUNCTION FOR DEEP LINK ---
+async def deliver_movie_on_start(context: ContextTypes.DEFAULT_TYPE, movie_id: int, chat_id: int):
+    """
+    Fetches and sends a movie. Designed to be run as a separate task
+    to not interfere with the ConversationHandler.
+    """
+    await asyncio.sleep(1) # Small delay to ensure the welcome message appears first
+    conn = get_db_connection()
+    if not conn:
+        await context.bot.send_message(chat_id, "Database connection failed. Please try searching for the movie again.")
+        return
+
+    try:
+        cur = conn.cursor()
+        cur.execute("SELECT title, url, file_id FROM movies WHERE id = %s", (movie_id,))
+        movie_data = cur.fetchone()
+        cur.close()
+        conn.close()
+
+        if movie_data:
+            title, url, file_id = movie_data
+            # We need a dummy Update object to pass to send_movie_to_user
+            dummy_update = Update(update_id=0, message=telegram.Message(message_id=0, date=datetime.now(), chat=telegram.Chat(id=chat_id, type='private')))
+            await send_movie_to_user(dummy_update, context, movie_id, title, url, file_id)
+        else:
+            await context.bot.send_message(chat_id, "Sorry, I couldn't find the movie associated with that link. It might have been removed.")
+    except Exception as e:
+        logger.error(f"Error in deliver_movie_on_start: {e}")
+        await context.bot.send_message(chat_id, "Sorry, an error occurred while trying to send your movie.")
+
+
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Start command handler, now with deep linking for movie delivery."""
-    # Check for deep link payload (e.g., from a group button click)
+    """
+    Start command handler. Handles both normal starts and deep links for movie delivery.
+    """
+    # Check for deep link payload (e.g., /start movie_123)
     if context.args and context.args[0].startswith("movie_"):
         try:
             movie_id = int(context.args[0].split('_')[1])
-            conn = get_db_connection()
-            if not conn:
-                await update.message.reply_text("Database connection failed. Please try again.")
-                return MAIN_MENU
+            chat_id = update.effective_chat.id
+            # Schedule the movie delivery to run in the background
+            asyncio.create_task(deliver_movie_on_start(context, movie_id, chat_id))
+        except (IndexError, ValueError) as e:
+            logger.error(f"Error processing deep link payload: {context.args[0]} - {e}")
+            await update.message.reply_text("Sorry, that's an invalid movie link.")
 
-            cur = conn.cursor()
-            # Fetch all details needed for send_movie_to_user
-            cur.execute("SELECT title, url, file_id FROM movies WHERE id = %s", (movie_id,))
-            movie_data = cur.fetchone()
-            cur.close()
-            conn.close()
-
-            if movie_data:
-                title, url, file_id = movie_data
-                # Directly call the function to send the movie to the user
-                await send_movie_to_user(update, context, movie_id, title, url, file_id)
-                # After sending, show the main menu
-                await update.message.reply_text("What would you like to do next?", reply_markup=get_main_keyboard())
-                return MAIN_MENU
-            else:
-                await update.message.reply_text("Sorry, I couldn't find the movie associated with that link. It might have been removed.")
-        except (IndexError, ValueError, Exception) as e:
-            logger.error(f"Error processing deep link: {e}")
-            await update.message.reply_text("Sorry, there was an error processing your link.")
-        
-        return MAIN_MENU
-
-    # If no deep link, show the standard welcome message
-    try:
-        welcome_text = """
+    # ALWAYS show the welcome message and start the main menu conversation
+    welcome_text = """
 📨 Sᴇɴᴅ Mᴏᴠɪᴇ Oʀ Sᴇʀɪᴇs Nᴀᴍᴇ ᴀɴᴅ Yᴇᴀʀ Aꜱ Pᴇʀ Gᴏᴏɢʟᴇ Sᴘᴇʟʟɪɴɢ..!! 👍
 
 ⚠️ Exᴀᴍᴘʟᴇ Fᴏʀ Mᴏᴠɪᴇ 👇
@@ -1117,10 +1130,8 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 ⚠️ ᴅᴏɴ'ᴛ ᴀᴅᴅ ᴇᴍᴏᴊɪꜱ ᴀɴᴅ ꜱʏᴍʙᴏʟꜱ ɪɴ ᴍᴏᴠɪᴇ ɴᴀᴍᴇ, ᴜꜱᴇ ʟᴇᴛᴛᴇʀꜱ ᴏɴʟʏ..!! ❌
 """
-        await update.message.reply_text(welcome_text, reply_markup=get_main_keyboard())
-        return MAIN_MENU
-    except Exception as e:
-        logger.error(f"Error in start command: {e}")
+    await update.message.reply_text(welcome_text, reply_markup=get_main_keyboard())
+    return MAIN_MENU
 
 
 async def main_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -1451,7 +1462,8 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 movie_id = int(parts[2])
                 original_user_id = int(parts[3])
 
-            except (ValueError, IndexError):
+            except (ValueError, IndexError) as e:
+                logger.error(f"Error parsing group_get callback data: {query.data} - {e}")
                 await query.edit_message_text("❌ Error: Invalid button data.")
                 return
 
