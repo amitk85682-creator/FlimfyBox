@@ -1,8 +1,16 @@
+# Add this snippet near the top of main.py, after your imports:
+try:
+    # prefer db_utils' fixed URL if it exists
+    import db_utils
+    FIXED_DATABASE_URL = getattr(db_utils, "FIXED_DATABASE_URL", None)
+except Exception:
+    FIXED_DATABASE_URL = None
 # -*- coding: utf-8 -*-
 import os
 import threading
 import asyncio
 import logging
+import random # FIX 1: Added import random
 import json
 import requests
 import signal
@@ -32,14 +40,6 @@ from fuzzywuzzy import process, fuzz
 from urllib.parse import urlparse, urlunparse, quote
 from collections import defaultdict
 
-# Add this snippet near the top of main.py, after your imports:
-try:
-    # prefer db_utils' fixed URL if it exists
-    import db_utils
-    FIXED_DATABASE_URL = getattr(db_utils, "FIXED_DATABASE_URL", None)
-except Exception:
-    FIXED_DATABASE_URL = None
-
 # ==================== LOGGING SETUP ====================
 logging.basicConfig(
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
@@ -50,8 +50,6 @@ logger = logging.getLogger(__name__)
 # ==================== CONVERSATION STATES ====================
 MAIN_MENU, SEARCHING, REQUESTING = range(3)
 
-# ==================== CHARACTER PROMPT ====================
-# [cite_start]FIX: CHARACTER_PROMPT को हटा दिया गया है [cite: 3, 4, 5, 6]
 # ==================== ENVIRONMENT VARIABLES ====================
 TELEGRAM_BOT_TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN")
 GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY")
@@ -62,13 +60,12 @@ UPDATE_SECRET_CODE = os.environ.get('UPDATE_SECRET_CODE', 'default_secret_123')
 ADMIN_USER_ID = int(os.environ.get('ADMIN_USER_ID', 0))
 GROUP_CHAT_ID = os.environ.get('GROUP_CHAT_ID')
 ADMIN_CHANNEL_ID = os.environ.get('ADMIN_CHANNEL_ID')
+# Channel URL for the "Join" button
+FILMFYBOX_CHANNEL_URL = os.environ.get('FILMFYBOX_CHANNEL_URL', 'http://t.me/filmfybox')
 
-# --- Random GIF IDs for Search Failure (Moved here for clarity) ---
-# FIX: SEARCH_ERROR_GIFS वैरिएबल को हटा दिया गया है
-# ----------------------------------------------
 
 # Rate limiting dictionary
-user_last_request = defaultdict(lambda: datetime.min)  # FIX 2: Removed duplicate definition
+user_last_request = defaultdict(lambda: datetime.min) # FIX 2: Removed duplicate definition
 
 # ===== New / Configurable rate-limiting and fuzzy settings =====
 REQUEST_COOLDOWN_MINUTES = int(os.environ.get('REQUEST_COOLDOWN_MINUTES', '10'))  # per-user cooldown for same/similar movie
@@ -161,8 +158,7 @@ def _normalize_title_for_match(title: str) -> str:
 def get_last_similar_request_for_user(user_id: int, title: str, minutes_window: int = REQUEST_COOLDOWN_MINUTES):
     """
     Look up the user's most recent request that is sufficiently similar to `title`
-    AND within the specified minutes_window.
-    Returns a dict with stored_title, requested_at, score or None.
+    AND within the specified minutes_window. Returns a dict with stored_title, requested_at, score or None.
     """
     conn = get_db_connection()
     if not conn:
@@ -502,8 +498,7 @@ def get_movies_from_db(user_query, limit=10):
 
 # ==================== STORE USER REQUEST (fixed) ====================
 def store_user_request(user_id, username, first_name, movie_title, group_id=None, message_id=None):
-    """Store user request in database.
-Uses ON CONFLICT DO UPDATE to refresh timestamp for exact duplicates."""
+    """Store user request in database. Uses ON CONFLICT DO UPDATE to refresh timestamp for exact duplicates."""
     try:
         conn = get_db_connection()
         if not conn:
@@ -544,18 +539,19 @@ async def analyze_intent(message_text):
         model = genai.GenerativeModel(model_name='gemini-1.5-flash')
 
         prompt = f"""
-        You are a 'Request Analyzer' for a Telegram bot.
-        The bot's ONLY purpose is to provide MOVIES and WEB SERIES. Nothing else.
-Analyze the user's message below. Your task is to determine ONLY ONE THING:
+        You are a 'Request Analyzer' for a Telegram bot named FilmfyBox.
+        FilmfyBox's ONLY purpose is to provide MOVIES and WEB SERIES. Nothing else.
+
+        Analyze the user's message below. Your task is to determine ONLY ONE THING:
         Is the user asking for a movie or a web series?
-- If the user IS asking for a movie or web series, respond with a JSON object:
+
+        - If the user IS asking for a movie or web series, respond with a JSON object:
           {{"is_request": true, "content_title": "Name of the Movie/Series"}}
 
         - If the user is talking about ANYTHING ELSE, respond with:
           {{"is_request": false, "content_title": null}}
 
-        Do not explain yourself.
-Only provide the JSON.
+        Do not explain yourself. Only provide the JSON.
 
         User's Message: "{message_text}"
         """
@@ -626,11 +622,15 @@ async def notify_users_for_movie(context: ContextTypes.DEFAULT_TYPE, movie_title
     notified_count = 0
 
     caption_text = (
-        f"🎬 <b>{movie_title}</b>\n\n"
-        "🔗 <b>JOIN »</b> FilmfyBox (http://t.me/filmfybox)\n\n"
-        "🔹 <b>Please drop the movie name, and I’ll find it for you as soon as possible. 🎬✨👇</b>\n"
-        "🔹 <b>FlimfyBox Chat (https://t.me/Filmfybox002)</b>"
-    )
+    f"🎬 <b>{movie_title}</b>\n\n"
+    "🔗 <b>JOIN »</b> FilmfyBox (http://t.me/filmfybox)\n\n"
+    "🔹 <b>Please drop the movie name, and I’ll find it for you as soon as possible. 🎬✨👇</b>\n"
+    "🔹 <b>FlimfyBox Chat (https://t.me/Filmfybox002)</b>"
+)
+    # Keyboard with a "Join Channel" button, to be attached to the media message
+    join_channel_keyboard = InlineKeyboardMarkup([[
+        InlineKeyboardButton("🔗 Join Channel", url=FILMFYBOX_CHANNEL_URL)
+    ]])
 
     try:
         conn = get_db_connection()
@@ -654,7 +654,7 @@ async def notify_users_for_movie(context: ContextTypes.DEFAULT_TYPE, movie_title
 
                 warning_msg = await context.bot.send_message(
                     chat_id=user_id,
-                    text="⚠️ ❌👉This file automatically❗️delete after 1 minute❗️so please forward in another chat👈❌", # FIX: Channel link removed [cite: 5]
+                    text="⚠️ ❌👉This file automatically❗️delete after 1 minute❗️so please forward in another chat👈❌",
                     parse_mode='Markdown'
                 )
 
@@ -666,7 +666,8 @@ async def notify_users_for_movie(context: ContextTypes.DEFAULT_TYPE, movie_title
                         chat_id=user_id,
                         document=movie_url_or_file_id,
                         caption=caption_text,
-                        parse_mode='HTML'
+                        parse_mode='HTML',
+                        reply_markup=join_channel_keyboard
                     )
                 # Check if it's a Telegram channel link
                 elif isinstance(movie_url_or_file_id, str) and movie_url_or_file_id.startswith("https://t.me/c/"):
@@ -677,8 +678,9 @@ async def notify_users_for_movie(context: ContextTypes.DEFAULT_TYPE, movie_title
                         chat_id=user_id,
                         from_chat_id=from_chat_id,
                         message_id=msg_id,
-                        caption=caption_text, # Added caption to notify_users_for_movie as well for consistency
-                        parse_mode='HTML' # Changed to HTML to match the new caption style
+                        caption=caption_text,
+                        parse_mode='HTML',
+                        reply_markup=join_channel_keyboard
                     )
                 # Check if it's a regular HTTP URL
                 elif isinstance(movie_url_or_file_id, str) and movie_url_or_file_id.startswith("http"):
@@ -686,14 +688,15 @@ async def notify_users_for_movie(context: ContextTypes.DEFAULT_TYPE, movie_title
                         chat_id=user_id,
                         text=f"🎬 {movie_title} is now available!\n\n{caption_text}",
                         reply_markup=get_movie_options_keyboard(movie_title, movie_url_or_file_id),
-                        parse_mode='HTML' # Changed to HTML to match the new caption style
+                        parse_mode='HTML'
                     )
                 else: # Fallback for other cases, assuming it might be a file_id
                     sent_msg = await context.bot.send_document(
                         chat_id=user_id,
                         document=movie_url_or_file_id,
                         caption=caption_text,
-                        parse_mode='HTML' # Changed to HTML to match the new caption style
+                        parse_mode='HTML',
+                        reply_markup=join_channel_keyboard
                     )
 
                 # Auto-delete
@@ -706,14 +709,6 @@ async def notify_users_for_movie(context: ContextTypes.DEFAULT_TYPE, movie_title
                             60
                         )
                     )
-                
-                # [cite_start]FIX: Send "Join Channel" button AFTER sending the file [cite: 5]
-                join_keyboard = InlineKeyboardMarkup([[InlineKeyboardButton("🔗 Join Channel", url="http://t.me/filmfybox")]])
-                await context.bot.send_message(
-                    chat_id=user_id, 
-                    text="Don't miss any updates! Join our main channel:", 
-                    reply_markup=join_keyboard
-                )
 
                 cur.execute(
                     "UPDATE user_requests SET notified = TRUE WHERE user_id = %s AND movie_title ILIKE %s",
@@ -814,6 +809,7 @@ def get_admin_request_keyboard(user_id, movie_title):
     """Inline keyboard for admin actions on a user request."""
     # Note: movie_title needs to be sanitized for callback data length (max 64 bytes)
     # We use a short version of the title and the user ID to trace the request back.
+
     sanitized_title = movie_title[:30]
 
     keyboard = [
@@ -823,10 +819,11 @@ def get_admin_request_keyboard(user_id, movie_title):
     return InlineKeyboardMarkup(keyboard)
 
 def get_movie_options_keyboard(movie_title, url):
-    """Get inline keyboard for movie options"""
+    """Get inline keyboard for movie options, now with Join Channel button."""
     keyboard = [
         [InlineKeyboardButton("🎬 Watch Now", url=url)],
-        [InlineKeyboardButton("📥 Download", callback_data=f"download_{movie_title[:50]}")]
+        [InlineKeyboardButton("📥 Download", callback_data=f"download_{movie_title[:50]}")],
+        [InlineKeyboardButton("🔗 Join Channel", url=FILMFYBOX_CHANNEL_URL)]
     ]
     return InlineKeyboardMarkup(keyboard)
 
@@ -921,8 +918,8 @@ def create_quality_selection_keyboard(movie_id, title, qualities):
 async def send_movie_to_user(update: Update, context: ContextTypes.DEFAULT_TYPE, movie_id: int, title: str, url: Optional[str] = None, file_id: Optional[str] = None):
     """
     Sends the movie file/link to the user with a warning and caption.
-This function expects the specific URL/File ID to be passed as arguments.
-"""
+    This function expects the specific URL/File ID to be passed as arguments.
+    """
     chat_id = update.effective_chat.id
 
     # ------------------- DATA FALLBACK REMOVED / CHECK -------------------
@@ -954,7 +951,7 @@ This function expects the specific URL/File ID to be passed as arguments.
         # Initial warning (auto-delete with media if media sent)
         warning_msg = await context.bot.send_message(
             chat_id=chat_id,
-            text="⚠️ ❌👉This file automatically❗️deletes after 1 minute❗️so please forward it to another chat👈❌", # FIX: Channel link removed [cite: 5]
+            text="⚠️ ❌👉This file automatically❗️deletes after 1 minute❗️so please forward it to another chat👈❌",
             parse_mode='Markdown'
         )
 
@@ -966,6 +963,12 @@ This function expects the specific URL/File ID to be passed as arguments.
             "🔹 <b>Please drop the movie name, and I’ll find it for you as soon as possible. 🎬✨👇</b>\n"
             "🔹 <b><a href='https://t.me/Filmfybox002'>FlimfyBox Chat</a></b>"
         )
+        
+        # Keyboard with a "Join Channel" button, to be attached to the media message
+        join_channel_keyboard = InlineKeyboardMarkup([[
+            InlineKeyboardButton("🔗 Join Channel", url=FILMFYBOX_CHANNEL_URL)
+        ]])
+
 
         # 1) file_id -> caption attached under media
         if file_id:
@@ -973,7 +976,8 @@ This function expects the specific URL/File ID to be passed as arguments.
                 chat_id=chat_id,
                 document=file_id,
                 caption=caption_text,
-                parse_mode='HTML'
+                parse_mode='HTML',
+                reply_markup=join_channel_keyboard
             )
 
         # 2) Private channel message link: t.me/c/<chat_id>/<msg_id>
@@ -988,7 +992,8 @@ This function expects the specific URL/File ID to be passed as arguments.
                     from_chat_id=from_chat_id,
                     message_id=message_id,
                     caption=caption_text,
-                    parse_mode='HTML'
+                    parse_mode='HTML',
+                    reply_markup=join_channel_keyboard
                 )
             except Exception as e:
                 logger.error(f"Copy private link failed {url}: {e}")
@@ -1012,7 +1017,8 @@ This function expects the specific URL/File ID to be passed as arguments.
                     from_chat_id=from_chat_id,
                     message_id=message_id,
                     caption=caption_text,
-                    parse_mode='HTML'
+                    parse_mode='HTML',
+                    reply_markup=join_channel_keyboard
                 )
             except Exception as e:
                 logger.error(f"Copy public link failed {url}: {e}")
@@ -1052,14 +1058,6 @@ This function expects the specific URL/File ID to be passed as arguments.
                     60 # 60 seconds delay
                 )
             )
-        
-        # [cite_start]FIX: Send "Join Channel" button AFTER sending the file [cite: 5]
-        join_keyboard = InlineKeyboardMarkup([[InlineKeyboardButton("🔗 Join Channel", url="http://t.me/filmfybox")]])
-        await context.bot.send_message(
-            chat_id=chat_id, 
-            text="Don't miss any updates! Join our main channel:", 
-            reply_markup=join_keyboard
-        )
 
     except Exception as e:
         logger.error(f"Error sending movie to user: {e}")
@@ -1070,52 +1068,60 @@ This function expects the specific URL/File ID to be passed as arguments.
 
 # ==================== TELEGRAM BOT HANDLERS ====================
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Start command handler"""
-    try:
-        # [cite_start]FIX: Deep link handling for group requests [cite: 4]
-        if context.args and context.args[0].startswith("movie_"):
-            try:
-                movie_id = int(context.args[0].split('_')[-1])
-                conn = get_db_connection()
-                if conn:
-                    cur = conn.cursor()
-                    cur.execute("SELECT id, title, url, file_id FROM movies WHERE id = %s", (movie_id,))
-                    movie = cur.fetchone()
-                    cur.close()
-                    conn.close()
-                
-                if movie:
-                    movie_id, title, url, file_id = movie
-                    # Send the movie first
-                    await send_movie_to_user(update, context, movie_id, title, url, file_id)
-                else:
-                    await update.message.reply_text("Sorry, I couldn't find that specific movie anymore.")
-            except Exception as e:
-                logger.error(f"Error processing deep link {context.args[0]}: {e}")
-                await update.message.reply_text("Sorry, something went wrong processing that link.")
+    """Start command handler, now with deep linking for movie delivery."""
+    # Check for deep link payload (e.g., from a group button click)
+    if context.args and context.args[0].startswith("movie_"):
+        try:
+            movie_id = int(context.args[0].split('_')[1])
+            conn = get_db_connection()
+            if not conn:
+                await update.message.reply_text("Database connection failed. Please try again.")
+                return MAIN_MENU
 
-        # Send normal welcome message
+            cur = conn.cursor()
+            # Fetch all details needed for send_movie_to_user
+            cur.execute("SELECT title, url, file_id FROM movies WHERE id = %s", (movie_id,))
+            movie_data = cur.fetchone()
+            cur.close()
+            conn.close()
+
+            if movie_data:
+                title, url, file_id = movie_data
+                # Directly call the function to send the movie to the user
+                await send_movie_to_user(update, context, movie_id, title, url, file_id)
+                # After sending, show the main menu
+                await update.message.reply_text("What would you like to do next?", reply_markup=get_main_keyboard())
+                return MAIN_MENU
+            else:
+                await update.message.reply_text("Sorry, I couldn't find the movie associated with that link. It might have been removed.")
+        except (IndexError, ValueError, Exception) as e:
+            logger.error(f"Error processing deep link: {e}")
+            await update.message.reply_text("Sorry, there was an error processing your link.")
+        
+        return MAIN_MENU
+
+    # If no deep link, show the standard welcome message
+    try:
         welcome_text = """
-📨 Sᴇɴᴅ Mᴏᴠɪᴇ Oʀ Sᴇʀɪᴇs Nᴀᴍᴇ ᴀɴᴅ Yᴇᴀʀ Aꜱ Pᴇʀ Gᴏᴏɢʟᴇ Sᴘᴇʟʟɪɴɢ..!!
-👍
+📨 Sᴇɴᴅ Mᴏᴠɪᴇ Oʀ Sᴇʀɪᴇs Nᴀᴍᴇ ᴀɴᴅ Yᴇᴀʀ Aꜱ Pᴇʀ Gᴏᴏɢʟᴇ Sᴘᴇʟʟɪɴɢ..!! 👍
 
 ⚠️ Exᴀᴍᴘʟᴇ Fᴏʀ Mᴏᴠɪᴇ 👇
 
 👉 Jailer
 👉 Jailer 2023
 
-⚠️ Exᴀᴍᴘʟᴇ Fᴏʀ WᴇʙSᴇʀɪs 👇
+⚠️ Exᴀᴍᴘʟᴇ Fᴏʀ WᴇʙSᴇʀɪᴇs 👇
 
 👉 Stranger Things
 👉 Stranger Things S02 E04
 
-⚠️ ᴅᴏɴ'ᴛ ᴀᴅᴅ ᴇᴍᴏᴊɪꜱ ᴀɴᴅ ꜱʏᴍʙᴏʟꜱ ɪɴ ᴍᴏᴠɪᴇ ɴᴀᴍᴇ, ᴜꜱᴇ ʟᴇᴛᴛᴇʀꜱ ᴏɴʟʏ..!!
-❌
+⚠️ ᴅᴏɴ'ᴛ ᴀᴅᴅ ᴇᴍᴏᴊɪꜱ ᴀɴᴅ ꜱʏᴍʙᴏʟꜱ ɪɴ ᴍᴏᴠɪᴇ ɴᴀᴍᴇ, ᴜꜱᴇ ʟᴇᴛᴛᴇʀꜱ ᴏɴʟʏ..!! ❌
 """
         await update.message.reply_text(welcome_text, reply_markup=get_main_keyboard())
         return MAIN_MENU
     except Exception as e:
         logger.error(f"Error in start command: {e}")
+
 
 async def main_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Handle main menu options"""
@@ -1163,14 +1169,14 @@ async def main_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
         elif query == '❓ Help':
             help_text = """
-🤖 How to use this Bot:
+🤖 How to use FilmfyBox Bot:
 
 🔍 Search Movies: Find movies in our collection
 🙋 Request Movie: Request a new movie to be added
 📊 My Stats: View your request statistics
 
 Just use the buttons below to navigate!
-"""
+            """
             await update.message.reply_text(help_text)
             return MAIN_MENU
         else:
@@ -1210,13 +1216,11 @@ async def search_movies(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
             messages_to_delete = []
 
-            # --- 1. Random GIF/Animation भेजना ---
-            # [cite_start]FIX: Hardcoded GIF ID, removed random.choice [cite: 2, 140]
-            gif_id = 'CgACAgQAAxkBAAECz0ppEaLwgDbNfPPFl5lgtFjjmztKKgAC5wIAAmaoDVMH7bkdAqNVnDYE'
+            # --- 1. Send a single, hardcoded GIF ---
             try:
                 gif_msg = await context.bot.send_animation(
                     chat_id=update.effective_chat.id,
-                    animation=gif_id,
+                    animation='CgACAgQAAxkBAAECz0ppEaLwgDbNfPPFl5lgtFjjmztKKgAC5wIAAmaoDVMH7bkdAqNVnDYE', # Hardcoded GIF ID
                     caption="🎬 **Movie Search Tips** 🔍",
                     parse_mode='Markdown'
                 )
@@ -1224,7 +1228,7 @@ async def search_movies(update: Update, context: ContextTypes.DEFAULT_TYPE):
             except Exception as e:
                 logger.error(f"Failed to send hardcoded animation: {e}")
 
-            # --- 2. Request बटन भेजना ---
+            # --- 2. Request button ---
             request_btn_msg = await update.message.reply_text(
                 f"😔 Sorry, '{user_message}' is not in my collection right now. Would you like to request it?",
                 reply_markup=InlineKeyboardMarkup([[
@@ -1234,10 +1238,9 @@ async def search_movies(update: Update, context: ContextTypes.DEFAULT_TYPE):
             messages_to_delete.append(request_btn_msg.message_id)
 
 
-            # --- 3. आकर्षक Search Tip मैसेज भेजना ---
+            # --- 3. Search Tip message ---
             error_msg = """
-Mᴏᴠɪᴇ ᴋɪ sᴘᴇʟʟɪɴɢ Gᴏᴏɢʟᴇ ᴘᴀʀ sᴇᴀʀᴄʜ ᴋᴀʀᴋᴇ, ᴄᴏᴘʏ ᴋᴀʀᴇ, ᴜsᴋᴇ ʙᴀᴀᴅ ʏᴀʜᴀ́ ᴛʏᴘᴇ/PAST ᴋᴀʀᴇ́.
-✔️
+Mᴏᴠɪᴇ ᴋɪ sᴘᴇʟʟɪɴɢ Gᴏᴏɢʟᴇ ᴘᴀʀ sᴇᴀʀᴄʜ ᴋᴀʀᴋᴇ, ᴄᴏᴘʏ ᴋᴀʀᴇ, ᴜsᴋᴇ ʙᴀᴀᴅ ʏᴀʜᴀ́ ᴛʏᴘᴇ/PAST ᴋᴀʀᴇ́. ✔️
 
 Bᴀs ᴍᴏᴠɪᴇ ᴋᴀ ɴᴀᴍᴇ + ʏᴇᴀʀ (ᴏʀ Sᴇʀɪᴇs Sᴇᴀsᴏɴ/Eᴘɪsᴏᴅᴇ) ʟɪᴋʜᴇ́, ᴜsᴋᴇ ᴀᴀɢᴇ ᴘɪᴄʜʜᴇ ᴋᴜᴄʜʜ ʙʜɪ ɴᴀ ʟɪᴋʜᴇ́. ❌
 
@@ -1254,11 +1257,10 @@ Bᴀs ᴍᴏᴠɪᴇ ᴋᴀ ɴᴀᴍᴇ + ʏᴇᴀʀ (ᴏʀ Sᴇʀɪᴇs Sᴇᴀ
 
 **Dᴏɴ’T ᴀᴅᴅ Eᴍᴏᴊɪs ᴀɴᴅ Sʏᴍʙᴏʟs ɪɴ Mᴏᴠɪᴇ Nᴀᴍᴇs!** ⚠️
 """
-            # Search Tips टेक्स्ट मैसेज
             tip_msg = await update.message.reply_text(error_msg, parse_mode='Markdown')
             messages_to_delete.append(tip_msg.message_id)
 
-            # --- 4. Auto-Delete Task शुरू करना (सभी मैसेज) ---
+            # --- 4. Auto-Delete Task ---
             if messages_to_delete:
                 asyncio.create_task(
                     delete_messages_after_delay(
@@ -1374,74 +1376,61 @@ async def request_movie(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("Sorry, an error occurred while processing your request.")
         return REQUESTING
 
-# ==================== NEW GROUP MESSAGE HANDLER ====================
-async def handle_group_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
+# ==================== NEW: GROUP MESSAGE HANDLER ====================
+async def group_message_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """
-    [cite_start]Handles passive movie detection in group chats. [cite: 3]
+    Listens to all messages in a group, and if a message matches a movie
+    in the database with high confidence, it prompts the user.
     """
-    if not update.message or not update.message.text:
+    # Ensure it's a text message and not from the bot itself
+    if not update.message or not update.message.text or update.message.from_user.is_bot:
         return
-    
-    user_message = update.message.text.strip()
+
+    message_text = update.message.text.strip()
     user = update.effective_user
-    
-    # Ignore commands or very short messages
-    if user_message.startswith('/') or len(user_message) < 4:
-        return
-        
-    # Ignore messages from the bot itself
-    if user.id == context.bot.id:
+
+    # Avoid triggering on very short messages or commands
+    if len(message_text) < 4 or message_text.startswith('/'):
         return
 
-    try:
-        processed_query = preprocess_query(user_message)
-        if not processed_query:
-            return
-            
-        # Search DB for high-confidence match (limit 1)
-        movies_found = get_movies_from_db(processed_query, limit=1)
-        
-        if not movies_found:
-            return # No match found
+    # Use a precise search to find one potential match
+    movies_found = get_movies_from_db(message_text, limit=1)
 
-        movie_id, title, url, file_id = movies_found[0]
-        
-        # Confidence check: Ensure the found title is very similar to the query
-        # to avoid spamming on weak fuzzy matches.
-        score = fuzz.token_sort_ratio(processed_query, _normalize_title_for_match(title))
-        
-        if score < 90: # 90% threshold for a "proper/alias" match
-            logger.info(f"Group match skipped. Query '{processed_query}' matched '{title}' with score {score} (below 90).")
-            return
-            
-        logger.info(f"Group match found! Query '{processed_query}' matched '{title}' with score {score}.")
+    if movies_found:
+        # Check if the match is good enough to avoid false positives
+        match_title = movies_found[0][1]
+        score = fuzz.token_sort_ratio(_normalize_title_for_match(message_text), _normalize_title_for_match(match_title))
 
-        # Send confirmation message
-        user_mention = user.mention_markdown()
-        confirmation_text = f"Hey {user_mention}, are you looking for **{title}**?"
-        
-        keyboard = InlineKeyboardMarkup([[
-            InlineKeyboardButton("✅ Yes, I want this", callback_data=f"group_confirm_{movie_id}_{user.id}")
-        ]])
-        
-        sent_msg = await update.message.reply_text(
-            text=confirmation_text,
-            reply_markup=keyboard,
-            parse_mode='Markdown'
-        )
-        
-        # Auto-delete this confirmation message after 5 minutes (300 seconds)
-        asyncio.create_task(
-            delete_messages_after_delay(
-                context,
-                update.effective_chat.id,
-                [sent_msg.message_id],
-                300 
+        # Use a high confidence threshold for group prompts
+        if score > 90:
+            movie_id, title, _, _ = movies_found[0]
+
+            # To avoid spamming, check if this user was prompted for this movie recently
+            prompt_key = f"prompt_{user.id}_{movie_id}"
+            now = datetime.now()
+            last_prompt_time = context.chat_data.get(prompt_key)
+
+            if last_prompt_time and (now - last_prompt_time) < timedelta(minutes=10):
+                logger.info(f"Skipping prompt for user {user.id} for movie {movie_id} due to recent prompt.")
+                return  # Don't prompt again so soon
+
+            context.chat_data[prompt_key] = now
+
+            keyboard = InlineKeyboardMarkup([[
+                InlineKeyboardButton("✅ Yes, get this movie", callback_data=f"group_get_{movie_id}_{user.id}")
+            ]])
+
+            # Reply to the user's message, mentioning them
+            reply_msg = await update.message.reply_text(
+                text=f"Hey {user.mention_markdown()}, are you looking for **{title}**? Click the button to get it.",
+                reply_markup=keyboard,
+                parse_mode='Markdown'
             )
-        )
-        
-    except Exception as e:
-        logger.error(f"Error in handle_group_message: {e}")
+
+            # Schedule the prompt message to be deleted after 2 minutes to keep the chat clean
+            asyncio.create_task(
+                delete_messages_after_delay(context, update.effective_chat.id, [reply_msg.message_id], delay=120)
+            )
 
 
 async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -1449,6 +1438,37 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     try:
         query = update.callback_query
         await query.answer()
+
+        # --- NEW: Handle "Get Movie" from a group prompt ---
+        if query.data.startswith("group_get_"):
+            # Format: group_get_{movie_id}_{user_id}
+            try:
+                _, movie_id_str, original_user_id_str = query.data.split('_')
+                movie_id = int(movie_id_str)
+                original_user_id = int(original_user_id_str)
+            except ValueError:
+                await query.edit_message_text("❌ Error: Invalid button data.")
+                return
+
+            # Security Check: Only the user who was prompted can click the button.
+            if query.from_user.id != original_user_id:
+                await query.answer("This button is not for you.", show_alert=True)
+                return
+
+            # Get bot's username to create a deep link to the private chat
+            bot_username = (await context.bot.get_me()).username
+            deep_link = f"https://t.me/{bot_username}?start=movie_{movie_id}"
+
+            keyboard = InlineKeyboardMarkup([[
+                InlineKeyboardButton("🤖 Start Chat & Get Movie", url=deep_link)
+            ]])
+
+            # Edit the original message in the group to provide the private chat link
+            await query.edit_message_text(
+                "Great! Click the button below to go to our private chat, and I'll send you the movie.",
+                reply_markup=keyboard
+            )
+            return
 
         # Handle movie selection (Now prompts for quality)
         if query.data.startswith("movie_"):
@@ -1501,32 +1521,6 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 selection_text,
                 reply_markup=keyboard,
                 parse_mode='Markdown'
-            )
-
-        # [cite_start]--- NEW GROUP CONFIRM HANDLER --- [cite: 3, 4]
-        elif query.data.startswith("group_confirm_"):
-            parts = query.data.split('_')
-            movie_id = int(parts[2])
-            original_user_id = int(parts[3])
-            
-            user_who_clicked = query.from_user
-            
-            # Check if the user who clicked is the one who was mentioned
-            if user_who_clicked.id != original_user_id:
-                await query.answer("This button is for the user who sent the message.", show_alert=True)
-                return
-
-            # User is authorized, show "Go to PM" button
-            bot_username = context.bot.username
-            deep_link_url = f"https://t.me/{bot_username}?start=movie_{movie_id}"
-            
-            pm_keyboard = InlineKeyboardMarkup([[
-                InlineKeyboardButton("➡️ Go to Private Chat", url=deep_link_url)
-            ]])
-            
-            await query.edit_message_text(
-                text="Great! Please go to my private chat to get your movie. Click the button below and press START.",
-                reply_markup=pm_keyboard
             )
 
         # --- NEW ADMIN HANDLERS ---
@@ -1612,8 +1606,8 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     break
 
             if not chosen_file:
-                await query.edit_message_text("❌ Error fetching the file for that quality.")
-                return
+                 await query.edit_message_text("❌ Error fetching the file for that quality.")
+                 return
 
             title = movie_data['title']
 
@@ -1808,8 +1802,7 @@ async def bulk_add_movies(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
         if len(lines) <= 1 and not context.args:
             await update.message.reply_text("""
-गलत फॉर्मेट!
-ऐसे इस्तेमाल करें:
+गलत फॉर्मेट! ऐसे इस्तेमाल करें:
 
 /bulkadd
 Movie1 https://link1.com
@@ -1846,7 +1839,7 @@ Movie3 file_id_here
                 cur = conn.cursor()
 
                 if any(url_or_id.startswith(prefix) for prefix in ["BQAC", "BAAC", "CAAC", "AQAC"]):
-                    cur.execute(
+                     cur.execute(
                         "INSERT INTO movies (title, url, file_id) VALUES (%s, %s, %s) ON CONFLICT (title) DO UPDATE SET url = EXCLUDED.url, file_id = EXCLUDED.file_id",
                         (title.strip(), "", url_or_id.strip())
                     )
@@ -1987,8 +1980,7 @@ async def bulk_add_aliases(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
         if len(lines) <= 1 and not context.args:
             await update.message.reply_text("""
-गलत फॉर्मेट!
-ऐसे इस्तेमाल करें:
+गलत फॉर्मेट! ऐसे इस्तेमाल करें:
 
 /aliasbulk
 Movie1: alias1, alias2, alias3
@@ -2774,7 +2766,7 @@ async def list_all_users(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
         users = cur.fetchall()
 
-        total_pages = (total_users + per_page - 1) // total_users > 0 else 1
+        total_pages = (total_users + per_page - 1) // per_page if total_users > 0 else 1
 
         users_text = f"👥 **Bot Users** (Page {page}/{total_pages})\n\n"
 
@@ -2975,7 +2967,7 @@ def main():
 
     application = Application.builder().token(TELEGRAM_BOT_TOKEN).read_timeout(30).write_timeout(30).build()
 
-    # Conversation handler for user interaction flow
+    # Conversation handler for user interaction flow in private chat
     conv_handler = ConversationHandler(
         entry_points=[CommandHandler('start', start)],
         states={
@@ -2990,15 +2982,17 @@ def main():
 
     # Register callback handler FIRST to prioritize button clicks over text messages.
     application.add_handler(CallbackQueryHandler(button_callback))
+
+    # NEW: Add the group message handler with a specific group so it doesn't interfere with conv_handler
+    # The handler will listen to text messages in groups that are not commands.
+    application.add_handler(MessageHandler(
+        filters.TEXT & ~filters.COMMAND & filters.ChatType.GROUPS,
+        group_message_handler
+    ))
+
+    # Add the main conversation handler for private chats and direct commands
     application.add_handler(conv_handler)
 
-    # [cite_start]--- NEW: Group Message Handler for passive monitoring --- [cite: 3]
-    # यह TEXT को, COMMANDS को छोड़कर, और केवल GROUPS में हैंडल करता है
-    application.add_handler(MessageHandler(
-        filters.TEXT & ~filters.COMMAND & filters.ChatType.GROUPS, 
-        handle_group_message
-    ))
-    
     # Admin commands
     application.add_handler(CommandHandler("addmovie", add_movie))
     application.add_handler(CommandHandler("bulkadd", bulk_add_movies))
