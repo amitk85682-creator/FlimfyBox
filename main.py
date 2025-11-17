@@ -1473,12 +1473,19 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
         # --- NEW: Handle "Get Movie" from a group prompt ---
         if query.data.startswith("group_get_"):
-            # Format: group_get_{movie_id}_{user_id}
+            # Format expected: group_get_{movie_id}_{user_id}
+            parts = query.data.split('_', 2)  # use maxsplit to allow underscores in later parts (defensive)
+            if len(parts) < 3:
+                logger.error(f"Invalid group_get callback data: {query.data}")
+                await query.edit_message_text("❌ Error: Invalid button data.")
+                return
+
+            _, movie_id_str, original_user_id_str = parts
             try:
-                _, movie_id_str, original_user_id_str = query.data.split('_')
                 movie_id = int(movie_id_str)
                 original_user_id = int(original_user_id_str)
             except ValueError:
+                logger.error(f"Invalid integers in group_get callback data: {query.data}")
                 await query.edit_message_text("❌ Error: Invalid button data.")
                 return
 
@@ -1554,6 +1561,202 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 reply_markup=keyboard,
                 parse_mode='Markdown'
             )
+
+        # --- NEW ADMIN HANDLERS ---
+        elif query.data.startswith("admin_fulfill_"):
+            # Format: 'admin_fulfill_<user_id>_<movie_title>'
+            parts = query.data.split('_', 2)
+            user_id = int(parts[1])
+            movie_title = parts[2]
+
+            # 1. Update the request status (SET notified=TRUE)
+            conn = get_db_connection()
+            if conn:
+                cur = conn.cursor()
+                # Find movie in movies table
+                cur.execute("SELECT id, url, file_id FROM movies WHERE title = %s LIMIT 1", (movie_title,))
+                movie_data = cur.fetchone()
+
+                if movie_data:
+                    movie_id, url, file_id = movie_data
+                    value_to_send = file_id if file_id else url
+
+                    # Notify the single user (optional: update ALL pending requests for this movie)
+                    num_notified = await notify_users_for_movie(context, movie_title, value_to_send)
+
+                    await query.edit_message_text(
+                        f"✅ FULFILLED: Movie '{movie_title}' updated and user (ID: {user_id}) notified ({num_notified} total users).",
+                        parse_mode='Markdown'
+                    )
+                else:
+                    # Only delete request in user_requests table if fulfill is successful
+                    await query.edit_message_text(f"❌ ERROR: Movie '{movie_title}' not found in the `movies` table. Please add it first.", parse_mode='Markdown')
+
+                cur.close()
+                conn.close()
+            else:
+                await query.edit_message_text("❌ Database error during fulfillment.")
+
+        elif query.data.startswith("admin_delete_"):
+            # Format: 'admin_delete_<user_id>_<movie_title>'
+            parts = query.data.split('_', 2)
+            user_id = int(parts[1])
+            movie_title = parts[2]
+
+            # 1. Delete the specific user request from the database
+            conn = get_db_connection()
+            if conn:
+                cur = conn.cursor()
+                # Delete only the specific user's request for this exact title
+                cur.execute("DELETE FROM user_requests WHERE user_id = %s AND movie_title = %s", (user_id, movie_title))
+                conn.commit()
+                cur.close()
+                conn.close()
+                await query.edit_message_text(f"❌ DELETED: Request for '{movie_title}' from User ID {user_id} removed.", parse_mode='Markdown')
+            else:
+                await query.edit_message_text("❌ Database error during deletion.")
+
+        # --- END NEW ADMIN HANDLERS ---
+        # --- NEW BLOCK FOR QUALITY SELECTION ---
+        elif query.data.startswith("quality_"):
+            # Format: 'quality_<movie_id>_<quality>' where <quality> may contain underscores
+            parts = query.data.split('_', 2)
+            if len(parts) < 3:
+                logger.error(f"Invalid quality callback data: {query.data}")
+                await query.edit_message_text("❌ Error: Invalid button data.")
+                return
+
+            try:
+                movie_id = int(parts[1])
+            except ValueError:
+                logger.error(f"Invalid movie id in quality callback: {query.data}")
+                await query.edit_message_text("❌ Error: Invalid button data.")
+                return
+
+            selected_quality = parts[2]  # remainder may contain underscores
+
+            # Retrieve movie data from user_data
+            movie_data = context.user_data.get('selected_movie_data')
+
+            if not movie_data or movie_data.get('id') != movie_id:
+                # Try fetching data again if session expired (less reliable but fallback)
+                qualities = get_all_movie_qualities(movie_id)
+                movie_data = {'id': movie_id, 'title': 'Movie', 'qualities': qualities}
+
+            if not movie_data or 'qualities' not in movie_data:
+                await query.edit_message_text("❌ Error: Could not retrieve movie data. Please search again.")
+                return
+
+            # Find the specific link/file_id for the chosen quality
+            chosen_file = None
+            for quality, url, file_id in movie_data['qualities']:
+                if quality == selected_quality:
+                    # Prefer file_id over URL for sending media
+                    chosen_file = {'url': url, 'file_id': file_id}
+                    break
+
+            if not chosen_file:
+                 await query.edit_message_text("❌ Error fetching the file for that quality.")
+                 return
+
+            title = movie_data['title']
+
+            # Edit the quality selection message
+            await query.edit_message_text(f"✅ Sending **{title}** in **{selected_quality}**...", parse_mode='Markdown')
+
+            # Send the movie using the specific file/url
+            await send_movie_to_user(
+                update,
+                context,
+                movie_id,
+                title,
+                chosen_file['url'],
+                chosen_file['file_id']
+            )
+
+            # Clear user data once transaction is complete
+            if 'selected_movie_data' in context.user_data:
+                del context.user_data['selected_movie_data']
+
+        # Handle page navigation (remains the same)
+        elif query.data.startswith("page_"):
+            page = int(query.data.replace("page_", ""))
+
+            if 'search_results' not in context.user_data:
+                await query.edit_message_text("❌ Search results expired. Please search again.")
+                return
+
+            movies = context.user_data['search_results']
+            search_query = context.user_data.get('search_query', 'your search')
+
+            selection_text = f"🎬 **Found {len(movies)} movies matching '{search_query}'**\n\nPlease select the movie you want:"
+            keyboard = create_movie_selection_keyboard(movies, page=page)
+
+            await query.edit_message_text(
+                selection_text,
+                reply_markup=keyboard,
+                parse_mode='Markdown'
+            )
+
+        # Handle cancel selection
+        elif query.data == "cancel_selection":
+            await query.edit_message_text("❌ Selection cancelled.")
+            # Clear stored search results
+            if 'search_results' in context.user_data:
+                del context.user_data['search_results']
+            if 'search_query' in context.user_data:
+                del context.user_data['search_query']
+            if 'selected_movie_data' in context.user_data:
+                del context.user_data['selected_movie_data']
+
+        # Handle movie request confirmation
+        elif query.data.startswith("request_"):
+            movie_title = query.data.replace("request_", "")
+            user = update.effective_user
+
+            store_user_request(
+                user.id,
+                user.username,
+                user.first_name,
+                movie_title,
+                update.effective_chat.id if update.effective_chat.type != "private" else None,
+                query.message.message_id
+            )
+
+            if ADMIN_CHANNEL_ID:
+                await send_admin_notification(context, user, movie_title)
+
+            await query.edit_message_text(f"✅ Got it! Your request for '{movie_title}' has been sent to the admin!")
+
+        # Handle download button
+        elif query.data.startswith("download_"):
+            movie_title = query.data.replace("download_", "")
+
+            # Search for the movie
+            conn = get_db_connection()
+            if not conn:
+                await query.answer("❌ Database connection failed.", show_alert=True)
+                return
+
+            cur = conn.cursor()
+            cur.execute("SELECT id, title, url, file_id FROM movies WHERE title ILIKE %s LIMIT 1", (f'%{movie_title}%',))
+            movie = cur.fetchone()
+            cur.close()
+            conn.close()
+
+            if movie:
+                movie_id, title, url, file_id = movie
+                # Direct download button will check for qualities within send_movie_to_user
+                await send_movie_to_user(update, context, movie_id, title, url, file_id)
+            else:
+                await query.answer("❌ Movie not found.", show_alert=True)
+
+    except Exception as e:
+        logger.error(f"Error in button callback: {e}")
+        try:
+            await query.answer(f"❌ Error: {str(e)}", show_alert=True)
+        except:
+            pass
 
         # --- NEW ADMIN HANDLERS ---
         elif query.data.startswith("admin_fulfill_"):
