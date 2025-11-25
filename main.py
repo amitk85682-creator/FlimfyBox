@@ -1223,7 +1223,7 @@ Just use the buttons below to navigate!
         return MAIN_MENU
 
 async def search_movies(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Handle movie search with multiple results support - Silent in Groups if not found"""
+    """Handle movie search with multiple results support"""
     try:
         # Rate limiting
         if not await check_rate_limit(update.effective_user.id):
@@ -1231,62 +1231,47 @@ async def search_movies(update: Update, context: ContextTypes.DEFAULT_TYPE):
             return SEARCHING
 
         user_message = update.message.text.strip()
-        # Preprocess query
         processed_query = preprocess_query(user_message) if user_message else user_message
         search_query = processed_query if processed_query else user_message
 
-        # Search for MULTIPLE movies in database (limit=10 is keyword arg, it is at the end, so it is safe)
+        # Search for MULTIPLE movies in database
         movies_found = get_movies_from_db(search_query, limit=10)
 
         if not movies_found:
-            # --- STEP 1: Check if it is a Group ---
-            # Agar ye Private chat nahi hai, to bot chup rahega (return karega)
+            # --- NEW CHANGE START ---
+            # Agar chat private nahi hai (yani Group hai), to chup chap return kar jao.
+            # Group me koi msg nahi jayega.
             if update.effective_chat.type != "private":
                 return MAIN_MENU
+            # --- NEW CHANGE END ---
 
-            # --- STEP 2: Store Request (Only runs in Private Chat now) ---
+            # Movie not found - store request logic (Sirf Private chat me ya logic chalega ab)
             user = update.effective_user
-            
-            # ERROR FIX: Yahan sabhi arguments 'positional' hain (bina naam ke).
-            # Humne complex logic hata kar 'None' likh diya hai kyunki ye Private chat hai.
             store_user_request(
-                user.id, 
-                user.username, 
-                user.first_name, 
-                user_message, 
-                None, 
+                user.id, user.username, user.first_name, user_message,
+                update.effective_chat.id if update.effective_chat.type != "private" else None,
                 update.message.message_id
             )
             
-            # --- STEP 3: Send GIF ---
+            # --- 1. Send a single, hardcoded GIF ---
             try:
-                # Yahan sabhi arguments 'keyword' hain (naam ke sath). Ye sahi hai.
-                await context.bot.send_animation(
+                gif_msg = await context.bot.send_animation(
                     chat_id=update.effective_chat.id,
-                    animation='https://media.giphy.com/media/26hkhKd2Cp5WMWU1O/giphy.gif', # Hardcoded GIF ID
-                    'https://media.giphy.com/media/3o7aTskHEUdgCQAXde/giphy.gif',
-                    'https://media.giphy.com/media/l2JhkHg5y5tW3wO3u/giphy.gif'
-                    'https://media.giphy.com/media/14uQ3cOFteDaU/giphy.gif',
-                    'https://media.giphy.com/media/xT9IgG50Fb7Mi0prBC/giphy.gif',
-                    'https://media.giphy.com/media/3o7abB06u9bNzA8lu8/giphy.gif',
-                    'https://media.giphy.com/media/3o7qDP7gNY08v4wYLy/giphy.gif',
+                    animation='CgACAgQAAxkBAAECz0ppEaLwgDbNfPPFl5lgtFjjmztKKgAC5wIAAmaoDVMH7bkdAqNVnDYE', # Hardcoded GIF ID
                     caption="🎬 **Movie Search Tips** 🔍",
                     parse_mode='Markdown'
                 )
             except Exception as e:
-                logger.error(f"Failed to send animation: {e}")
+                logger.error(f"Failed to send hardcoded animation: {e}")
 
-            # --- STEP 4: Request Button ---
+            # --- 2. Request button ---
             try:
-                # Arg 1: Text (Positional)
-                # Arg 2: reply_markup (Keyword)
-                # Order sahi hai.
-                await update.message.reply_text(
+                 request_btn_msg = await update.message.reply_text(
                     f"😔 Sorry, '{user_message}' is not in my collection right now. Would you like to request it?",
                     reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("✅ Yes, Request It", callback_data=f"request_{user_message[:50]}")]]))
             except: pass
 
-            # --- STEP 5: Send Tips ---
+            # --- 3. Search Tip message ---
             error_msg = """
 Mᴏᴠɪᴇ ᴋɪ sᴘᴇʟʟɪɴɢ Gᴏᴏɢʟᴇ ᴘᴀʀ sᴇᴀʀᴄʜ ᴋᴀʀᴋᴇ, ᴄᴏᴘʏ ᴋᴀʀᴇ, ᴜsᴋᴇ ʙᴀᴀᴅ ʏᴀʜᴀ́ ᴛʏᴘᴇ/PAST ᴋᴀʀᴇ́. ✔️
 
@@ -1314,10 +1299,11 @@ Bᴀs ᴍᴏᴠɪᴇ ᴋᴀ ɴᴀᴍᴇ + ʏᴇᴀʀ (ᴏʀ Sᴇʀɪᴇs Sᴇᴀ
         elif len(movies_found) == 1:
             movie_id, title, url, file_id = movies_found[0]
             
-            # Check qualities
+            # CHECK: If there are multiple qualities (e.g. Stream Link + 720p), show menu instead of auto-sending
             qualities = get_all_movie_qualities(movie_id)
             
             if len(qualities) > 1:
+                # Force menu display
                 context.user_data['selected_movie_data'] = {
                     'id': movie_id,
                     'title': title,
@@ -1327,10 +1313,11 @@ Bᴀs ᴍᴏᴠɪᴇ ᴋᴀ ɴᴀᴍᴇ + ʏᴇᴀʀ (ᴏʀ Sᴇʀɪᴇs Sᴇᴀ
                 keyboard = create_quality_selection_keyboard(movie_id, title, qualities)
                 await update.message.reply_text(selection_text, reply_markup=keyboard, parse_mode='Markdown')
             else:
+                # Only 1 option exists, send it directly
                 await send_movie_to_user(update, context, movie_id, title, url, file_id)
 
         else:
-            # Multiple movies found
+            # Multiple movies found - show selection menu
             context.user_data['search_results'] = movies_found
             context.user_data['search_query'] = user_message
 
@@ -1344,6 +1331,7 @@ Bᴀs ᴍᴏᴠɪᴇ ᴋᴀ ɴᴀᴍᴇ + ʏᴇᴀʀ (ᴏʀ Sᴇʀɪᴇs Sᴇᴀ
 
     except Exception as e:
         logger.error(f"Error in search movies: {e}")
+        # Yahan bhi check laga sakte hain taki error aane par bhi group me msg na jaye
         if update.effective_chat.type == "private":
             await update.message.reply_text("Sorry, something went wrong. Please try again.")
         return MAIN_MENU
