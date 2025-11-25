@@ -1238,7 +1238,7 @@ async def search_movies(update: Update, context: ContextTypes.DEFAULT_TYPE):
         movies_found = get_movies_from_db(search_query, limit=10)
 
         if not movies_found:
-            # Movie not found - store request logic (Same as before)
+            # Movie not found - store request logic
             user = update.effective_user
             store_user_request(
                 user.id, user.username, user.first_name, user_message,
@@ -1246,14 +1246,47 @@ async def search_movies(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 update.message.message_id
             )
             
-            # ... (Existing Not Found Logic: GIF, Request Button, Tips) ...
-            # Aapka purana "not found" wala code yahan as-is rahega
-            
+            # --- 1. Send a single, hardcoded GIF ---
+            try:
+                gif_msg = await context.bot.send_animation(
+                    chat_id=update.effective_chat.id,
+                    animation='CgACAgQAAxkBAAECz0ppEaLwgDbNfPPFl5lgtFjjmztKKgAC5wIAAmaoDVMH7bkdAqNVnDYE', # Hardcoded GIF ID
+                    caption="🎬 **Movie Search Tips** 🔍",
+                    parse_mode='Markdown'
+                )
+                # Auto delete handled separately or by generic function if needed
+            except Exception as e:
+                logger.error(f"Failed to send hardcoded animation: {e}")
+
+            # --- 2. Request button (FIXED BRACKET HERE) ---
             try:
                  request_btn_msg = await update.message.reply_text(
                     f"😔 Sorry, '{user_message}' is not in my collection right now. Would you like to request it?",
                     reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("✅ Yes, Request It", callback_data=f"request_{user_message[:50]}")]]))
                  )
+            except: pass
+
+            # --- 3. Search Tip message ---
+            error_msg = """
+Mᴏᴠɪᴇ ᴋɪ sᴘᴇʟʟɪɴɢ Gᴏᴏɢʟᴇ ᴘᴀʀ sᴇᴀʀᴄʜ ᴋᴀʀᴋᴇ, ᴄᴏᴘʏ ᴋᴀʀᴇ, ᴜsᴋᴇ ʙᴀᴀᴅ ʏᴀʜᴀ́ ᴛʏᴘᴇ/PAST ᴋᴀʀᴇ́. ✔️
+
+Bᴀs ᴍᴏᴠɪᴇ ᴋᴀ ɴᴀᴍᴇ + ʏᴇᴀʀ (ᴏʀ Sᴇʀɪᴇs Sᴇᴀsᴏɴ/Eᴘɪsᴏᴅᴇ) ʟɪᴋʜᴇ́, ᴜsᴋᴇ ᴀᴀɢᴇ ᴘɪᴄʜʜᴇ ᴋᴜᴄʜʜ ʙʜɪ ɴᴀ ʟɪᴋʜᴇ́. ❌
+
+---
+**📝 Example:**
+**Sᴀʜɪ ʜᴀɪ! 👇**
+👉 `KGF 2`
+👉 `Asur S01 E03`
+
+**Gᴀʟᴀᴛ ʜᴀɪ! 🙅**
+❌ `KGF 2 Movie`
+❌ `Asur Season 3 Download`
+---
+
+**Dᴏɴ’T ᴀᴅᴅ Eᴍᴏᴊɪs ᴀɴᴅ Sʏᴍʙᴏʟs ɪɴ Mᴏᴠɪᴇ Nᴀᴍᴇs!** ⚠️
+"""
+            try:
+                await update.message.reply_text(error_msg, parse_mode='Markdown')
             except: pass
             
             return MAIN_MENU
@@ -1265,8 +1298,7 @@ async def search_movies(update: Update, context: ContextTypes.DEFAULT_TYPE):
             qualities = get_all_movie_qualities(movie_id)
             
             if len(qualities) > 1:
-                # Force menu display by passing None for url/file_id
-                # This triggers the selection logic inside send_movie_to_user (or we can call menu directly)
+                # Force menu display
                 context.user_data['selected_movie_data'] = {
                     'id': movie_id,
                     'title': title,
@@ -1276,7 +1308,7 @@ async def search_movies(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 keyboard = create_quality_selection_keyboard(movie_id, title, qualities)
                 await update.message.reply_text(selection_text, reply_markup=keyboard, parse_mode='Markdown')
             else:
-                # Only 1 option exists (either just main URL or just 1 file), send it directly
+                # Only 1 option exists, send it directly
                 await send_movie_to_user(update, context, movie_id, title, url, file_id)
 
         else:
