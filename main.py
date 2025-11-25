@@ -1238,7 +1238,13 @@ async def search_movies(update: Update, context: ContextTypes.DEFAULT_TYPE):
         movies_found = get_movies_from_db(search_query, limit=10)
 
         if not movies_found:
-            # Movie not found - store request logic
+            # --- NEW CODE START: SILENT IN GROUPS ---
+            # Agar chat type 'private' nahi hai (yani group hai), to chup chap return kar do
+            if update.effective_chat.type != "private":
+                return MAIN_MENU
+            # --- NEW CODE END ---
+
+            # Movie not found - store request logic (Only runs in Private Chat now)
             user = update.effective_user
             store_user_request(
                 user.id, user.username, user.first_name, user_message,
@@ -1250,19 +1256,24 @@ async def search_movies(update: Update, context: ContextTypes.DEFAULT_TYPE):
             try:
                 gif_msg = await context.bot.send_animation(
                     chat_id=update.effective_chat.id,
-                    animation='CgACAgQAAxkBAAECz0ppEaLwgDbNfPPFl5lgtFjjmztKKgAC5wIAAmaoDVMH7bkdAqNVnDYE', # Hardcoded GIF ID
+                    animation='https://media.giphy.com/media/26hkhKd2Cp5WMWU1O/giphy.gif', # Hardcoded GIF ID
+                    'https://media.giphy.com/media/3o7aTskHEUdgCQAXde/giphy.gif',
+                    'https://media.giphy.com/media/l2JhkHg5y5tW3wO3u/giphy.gif'
+                    'https://media.giphy.com/media/14uQ3cOFteDaU/giphy.gif',
+                    'https://media.giphy.com/media/xT9IgG50Fb7Mi0prBC/giphy.gif',
+                    'https://media.giphy.com/media/3o7abB06u9bNzA8lu8/giphy.gif',
+                    'https://media.giphy.com/media/3o7qDP7gNY08v4wYLy/giphy.gif',
                     caption="🎬 **Movie Search Tips** 🔍",
                     parse_mode='Markdown'
                 )
             except Exception as e:
                 logger.error(f"Failed to send hardcoded animation: {e}")
 
-            # --- 2. Request button (CORRECTED: Bracket removed from next line) ---
+            # --- 2. Request button ---
             try:
                  request_btn_msg = await update.message.reply_text(
                     f"😔 Sorry, '{user_message}' is not in my collection right now. Would you like to request it?",
                     reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("✅ Yes, Request It", callback_data=f"request_{user_message[:50]}")]]))
-                 # Removed the extra parenthesis line here
             except: pass
 
             # --- 3. Search Tip message ---
@@ -1325,7 +1336,9 @@ Bᴀs ᴍᴏᴠɪᴇ ᴋᴀ ɴᴀᴍᴇ + ʏᴇᴀʀ (ᴏʀ Sᴇʀɪᴇs Sᴇᴀ
 
     except Exception as e:
         logger.error(f"Error in search movies: {e}")
-        await update.message.reply_text("Sorry, something went wrong. Please try again.")
+        # Error message bhi sirf private me bhej sakte hain agar chahein, filhal ye sab jagah jayega
+        if update.effective_chat.type == "private":
+            await update.message.reply_text("Sorry, something went wrong. Please try again.")
         return MAIN_MENU
 # ==================== REQUEST MOVIE (updated) ====================
 async def request_movie(update: Update, context: ContextTypes.DEFAULT_TYPE):
