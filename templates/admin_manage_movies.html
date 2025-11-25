@@ -39,7 +39,8 @@
             <td>{{ m.id }}</td>
             <td>{{ m.title }}</td>
             <td>
-              {% if m.url or m.file_id %}
+              {# Updated check: Includes generic Url and all specific qualities #}
+              {% if m.url or m.q_360 or m.q_480 or m.q_720 or m.q_1080 or m.q_2160 %}
                 Yes
               {% else %}
                 <span class="missing">Missing</span>
@@ -48,8 +49,7 @@
             <td>{{ m.aliases }}</td>
             <td>
               <a class="button" href="{{ url_for('admin.edit_movie', movie_id=m.id) }}">Edit</a>
-              <!-- optionally add delete endpoint/link -->
-            </td>
+              </td>
           </tr>
         {% endfor %}
       </tbody>
