@@ -30,31 +30,35 @@
       <input name="title" type="text" required value="{{ movie.title }}">
 
       <label>Description</label>
-<textarea name="description" rows="3">{{ movie.description }}</textarea>
+      <textarea name="description" rows="3">{{ movie.description }}</textarea>
 
-<label>Download Links / File IDs (fill one or more)</label>
-<div class="qualities">
-  <div>
-    <small>360p (Low)</small>
-    <input name="q_360" type="text" placeholder="360p link or file id" value="{{ movie.q_360 or '' }}">
-  </div>
-  <div>
-    <small>480p (SD)</small>
-    <input name="q_480" type="text" placeholder="480p link or file id" value="{{ movie.q_480 or '' }}">
-  </div>
-  <div>
-    <small>720p (Standard)</small>
-    <input name="q_720" type="text" placeholder="720p link or file id" value="{{ movie.q_720 or '' }}">
-  </div>
-  <div>
-    <small>1080p (HD)</small>
-    <input name="q_1080" type="text" placeholder="1080p link or file id" value="{{ movie.q_1080 or '' }}">
-  </div>
-  <div>
-    <small>2160p (4K)</small>
-    <input name="q_2160" type="text" placeholder="4K link or file id" value="{{ movie.q_2160 or '' }}">
-  </div>
-</div>
+      <label>Download Links / File IDs (fill one or more)</label>
+      <div class="qualities">
+        <div>
+           <small>Default Url (Stream/General)</small>
+           <input name="url" type="text" placeholder="General Url link or file id" value="{{ movie.url or '' }}">
+        </div>
+        <div>
+          <small>360p (Low)</small>
+          <input name="q_360" type="text" placeholder="360p link or file id" value="{{ movie.q_360 or '' }}">
+        </div>
+        <div>
+          <small>480p (SD)</small>
+          <input name="q_480" type="text" placeholder="480p link or file id" value="{{ movie.q_480 or '' }}">
+        </div>
+        <div>
+          <small>720p (Standard)</small>
+          <input name="q_720" type="text" placeholder="720p link or file id" value="{{ movie.q_720 or '' }}">
+        </div>
+        <div>
+          <small>1080p (HD)</small>
+          <input name="q_1080" type="text" placeholder="1080p link or file id" value="{{ movie.q_1080 or '' }}">
+        </div>
+        <div>
+          <small>2160p (4K)</small>
+          <input name="q_2160" type="text" placeholder="4K link or file id" value="{{ movie.q_2160 or '' }}">
+        </div>
+      </div>
 
       <label>Aliases (comma separated)</label>
       <input name="aliases" type="text" value="{{ movie.aliases or '' }}">
