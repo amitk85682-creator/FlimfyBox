@@ -1235,26 +1235,32 @@ async def search_movies(update: Update, context: ContextTypes.DEFAULT_TYPE):
         search_query = processed_query if processed_query else user_message
 
         # Search for MULTIPLE movies in database
+        # Note: Ensure arguments are correct here (positional first, then keyword)
         movies_found = get_movies_from_db(search_query, limit=10)
 
         if not movies_found:
-            # --- NEW CODE START: SILENT IN GROUPS ---
-            # Agar chat type 'private' nahi hai (yani group hai), to chup chap return kar do
+            # --- NEW CODE: SILENT IN GROUPS ---
+            # Agar chat type 'private' nahi hai, to return kar do (Koi msg nahi jayega)
             if update.effective_chat.type != "private":
                 return MAIN_MENU
-            # --- NEW CODE END ---
-
-            # Movie not found - store request logic (Only runs in Private Chat now)
+            
+            # --- STORE REQUEST LOGIC ---
             user = update.effective_user
+            
+            # Yahan dhyan de: Sabhi arguments positional (bina name= ke) hone chahiye
+            # Jaisa aapke purane code me tha
             store_user_request(
-                user.id, user.username, user.first_name, user_message,
-                update.effective_chat.id if update.effective_chat.type != "private" else None,
+                user.id, 
+                user.username, 
+                user.first_name, 
+                user_message,
+                update.effective_chat.id, # Private chat me chat_id user_id same hota hai ya logic use karein
                 update.message.message_id
             )
             
-            # --- 1. Send a single, hardcoded GIF ---
+            # --- 1. Send GIF (Using Keywords properly) ---
             try:
-                gif_msg = await context.bot.send_animation(
+                await context.bot.send_animation(
                     chat_id=update.effective_chat.id,
                     animation='https://media.giphy.com/media/26hkhKd2Cp5WMWU1O/giphy.gif', # Hardcoded GIF ID
                     'https://media.giphy.com/media/3o7aTskHEUdgCQAXde/giphy.gif',
@@ -1271,7 +1277,8 @@ async def search_movies(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
             # --- 2. Request button ---
             try:
-                 request_btn_msg = await update.message.reply_text(
+                # Yahan text (positional) pehle hai, fir reply_markup (keyword) hai. Ye sahi hai.
+                 await update.message.reply_text(
                     f"😔 Sorry, '{user_message}' is not in my collection right now. Would you like to request it?",
                     reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("✅ Yes, Request It", callback_data=f"request_{user_message[:50]}")]]))
             except: pass
@@ -1304,11 +1311,9 @@ Bᴀs ᴍᴏᴠɪᴇ ᴋᴀ ɴᴀᴍᴇ + ʏᴇᴀʀ (ᴏʀ Sᴇʀɪᴇs Sᴇᴀ
         elif len(movies_found) == 1:
             movie_id, title, url, file_id = movies_found[0]
             
-            # CHECK: If there are multiple qualities (e.g. Stream Link + 720p), show menu instead of auto-sending
             qualities = get_all_movie_qualities(movie_id)
             
             if len(qualities) > 1:
-                # Force menu display
                 context.user_data['selected_movie_data'] = {
                     'id': movie_id,
                     'title': title,
@@ -1318,11 +1323,9 @@ Bᴀs ᴍᴏᴠɪᴇ ᴋᴀ ɴᴀᴍᴇ + ʏᴇᴀʀ (ᴏʀ Sᴇʀɪᴇs Sᴇᴀ
                 keyboard = create_quality_selection_keyboard(movie_id, title, qualities)
                 await update.message.reply_text(selection_text, reply_markup=keyboard, parse_mode='Markdown')
             else:
-                # Only 1 option exists, send it directly
                 await send_movie_to_user(update, context, movie_id, title, url, file_id)
 
         else:
-            # Multiple movies found - show selection menu
             context.user_data['search_results'] = movies_found
             context.user_data['search_query'] = user_message
 
@@ -1336,7 +1339,7 @@ Bᴀs ᴍᴏᴠɪᴇ ᴋᴀ ɴᴀᴍᴇ + ʏᴇᴀʀ (ᴏʀ Sᴇʀɪᴇs Sᴇᴀ
 
     except Exception as e:
         logger.error(f"Error in search movies: {e}")
-        # Error message bhi sirf private me bhej sakte hain agar chahein, filhal ye sab jagah jayega
+        # Error sirf private me bhejein taaki group spam na ho
         if update.effective_chat.type == "private":
             await update.message.reply_text("Sorry, something went wrong. Please try again.")
         return MAIN_MENU
