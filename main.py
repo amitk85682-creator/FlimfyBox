@@ -1223,7 +1223,7 @@ Just use the buttons below to navigate!
         return MAIN_MENU
 
 async def search_movies(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Handle movie search with multiple results support"""
+    """Handle movie search with multiple results support - Silent in Groups if not found"""
     try:
         # Rate limiting
         if not await check_rate_limit(update.effective_user.id):
@@ -1231,35 +1231,36 @@ async def search_movies(update: Update, context: ContextTypes.DEFAULT_TYPE):
             return SEARCHING
 
         user_message = update.message.text.strip()
+        # Preprocess query
         processed_query = preprocess_query(user_message) if user_message else user_message
         search_query = processed_query if processed_query else user_message
 
-        # Search for MULTIPLE movies in database
-        # Note: Ensure arguments are correct here (positional first, then keyword)
+        # Search for MULTIPLE movies in database (limit=10 is keyword arg, it is at the end, so it is safe)
         movies_found = get_movies_from_db(search_query, limit=10)
 
         if not movies_found:
-            # --- NEW CODE: SILENT IN GROUPS ---
-            # Agar chat type 'private' nahi hai, to return kar do (Koi msg nahi jayega)
+            # --- STEP 1: Check if it is a Group ---
+            # Agar ye Private chat nahi hai, to bot chup rahega (return karega)
             if update.effective_chat.type != "private":
                 return MAIN_MENU
-            
-            # --- STORE REQUEST LOGIC ---
+
+            # --- STEP 2: Store Request (Only runs in Private Chat now) ---
             user = update.effective_user
             
-            # Yahan dhyan de: Sabhi arguments positional (bina name= ke) hone chahiye
-            # Jaisa aapke purane code me tha
+            # ERROR FIX: Yahan sabhi arguments 'positional' hain (bina naam ke).
+            # Humne complex logic hata kar 'None' likh diya hai kyunki ye Private chat hai.
             store_user_request(
                 user.id, 
                 user.username, 
                 user.first_name, 
-                user_message,
-                update.effective_chat.id, # Private chat me chat_id user_id same hota hai ya logic use karein
+                user_message, 
+                None, 
                 update.message.message_id
             )
             
-            # --- 1. Send GIF (Using Keywords properly) ---
+            # --- STEP 3: Send GIF ---
             try:
+                # Yahan sabhi arguments 'keyword' hain (naam ke sath). Ye sahi hai.
                 await context.bot.send_animation(
                     chat_id=update.effective_chat.id,
                     animation='https://media.giphy.com/media/26hkhKd2Cp5WMWU1O/giphy.gif', # Hardcoded GIF ID
@@ -1273,17 +1274,19 @@ async def search_movies(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     parse_mode='Markdown'
                 )
             except Exception as e:
-                logger.error(f"Failed to send hardcoded animation: {e}")
+                logger.error(f"Failed to send animation: {e}")
 
-            # --- 2. Request button ---
+            # --- STEP 4: Request Button ---
             try:
-                # Yahan text (positional) pehle hai, fir reply_markup (keyword) hai. Ye sahi hai.
-                 await update.message.reply_text(
+                # Arg 1: Text (Positional)
+                # Arg 2: reply_markup (Keyword)
+                # Order sahi hai.
+                await update.message.reply_text(
                     f"😔 Sorry, '{user_message}' is not in my collection right now. Would you like to request it?",
                     reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("✅ Yes, Request It", callback_data=f"request_{user_message[:50]}")]]))
             except: pass
 
-            # --- 3. Search Tip message ---
+            # --- STEP 5: Send Tips ---
             error_msg = """
 Mᴏᴠɪᴇ ᴋɪ sᴘᴇʟʟɪɴɢ Gᴏᴏɢʟᴇ ᴘᴀʀ sᴇᴀʀᴄʜ ᴋᴀʀᴋᴇ, ᴄᴏᴘʏ ᴋᴀʀᴇ, ᴜsᴋᴇ ʙᴀᴀᴅ ʏᴀʜᴀ́ ᴛʏᴘᴇ/PAST ᴋᴀʀᴇ́. ✔️
 
@@ -1311,6 +1314,7 @@ Bᴀs ᴍᴏᴠɪᴇ ᴋᴀ ɴᴀᴍᴇ + ʏᴇᴀʀ (ᴏʀ Sᴇʀɪᴇs Sᴇᴀ
         elif len(movies_found) == 1:
             movie_id, title, url, file_id = movies_found[0]
             
+            # Check qualities
             qualities = get_all_movie_qualities(movie_id)
             
             if len(qualities) > 1:
@@ -1326,6 +1330,7 @@ Bᴀs ᴍᴏᴠɪᴇ ᴋᴀ ɴᴀᴍᴇ + ʏᴇᴀʀ (ᴏʀ Sᴇʀɪᴇs Sᴇᴀ
                 await send_movie_to_user(update, context, movie_id, title, url, file_id)
 
         else:
+            # Multiple movies found
             context.user_data['search_results'] = movies_found
             context.user_data['search_query'] = user_message
 
@@ -1339,7 +1344,6 @@ Bᴀs ᴍᴏᴠɪᴇ ᴋᴀ ɴᴀᴍᴇ + ʏᴇᴀʀ (ᴏʀ Sᴇʀɪᴇs Sᴇᴀ
 
     except Exception as e:
         logger.error(f"Error in search movies: {e}")
-        # Error sirf private me bhejein taaki group spam na ho
         if update.effective_chat.type == "private":
             await update.message.reply_text("Sorry, something went wrong. Please try again.")
         return MAIN_MENU
