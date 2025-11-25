@@ -1254,16 +1254,15 @@ async def search_movies(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     caption="🎬 **Movie Search Tips** 🔍",
                     parse_mode='Markdown'
                 )
-                # Auto delete handled separately or by generic function if needed
             except Exception as e:
                 logger.error(f"Failed to send hardcoded animation: {e}")
 
-            # --- 2. Request button (FIXED BRACKET HERE) ---
+            # --- 2. Request button (CORRECTED: Bracket removed from next line) ---
             try:
                  request_btn_msg = await update.message.reply_text(
                     f"😔 Sorry, '{user_message}' is not in my collection right now. Would you like to request it?",
                     reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("✅ Yes, Request It", callback_data=f"request_{user_message[:50]}")]]))
-                 )
+                 # Removed the extra parenthesis line here
             except: pass
 
             # --- 3. Search Tip message ---
