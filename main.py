@@ -920,24 +920,25 @@ def get_all_movie_qualities(movie_id):
 
 
 def create_quality_selection_keyboard(movie_id, title, qualities):
-    """Create inline keyboard with quality selection buttons."""
+    """Create inline keyboard with quality selection buttons showing SIZE"""
     keyboard = []
 
-    # Store movie info for later use (needed in callback)
-    # We store the title to ensure we can use it in the final send message even if quality selection takes time
-    # This stores the state in user_data
-
-    for quality, url, file_id in qualities:
-        # Callback format: 'quality_<movie_id>_<quality>'
+    # Note: qualities tuple ab 4 items ka hai -> (quality, url, file_id, file_size)
+    for quality, url, file_id, file_size in qualities:
         callback_data = f"quality_{movie_id}_{quality}"
-        button_text = f"🎬 {quality} ({'File' if file_id else 'Link'})"
+        
+        # Agar size available hai to dikhayein, nahi to sirf Quality dikhayein
+        size_text = f" - {file_size}" if file_size else ""
+        link_type = "File" if file_id else "Link"
+        
+        # Button text example: "🎬 720p - 1.4GB (Link)"
+        button_text = f"🎬 {quality}{size_text} ({link_type})"
+        
         keyboard.append([InlineKeyboardButton(button_text, callback_data=callback_data)])
 
-    # Add cancel button
     keyboard.append([InlineKeyboardButton("❌ Cancel Selection", callback_data="cancel_selection")])
 
     return InlineKeyboardMarkup(keyboard)
-
 # ==================== HELPER FUNCTION (FIXED FOR QUALITY CHOICE) ====================
 async def send_movie_to_user(update: Update, context: ContextTypes.DEFAULT_TYPE, movie_id: int, title: str, url: Optional[str] = None, file_id: Optional[str] = None):
     """
