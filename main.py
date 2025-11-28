@@ -880,6 +880,7 @@ def get_all_movie_qualities(movie_id):
         cur = conn.cursor()
         
         # 1. Fetch specific qualities from movie_files table
+        # We fetch 3 columns, but we will pad the result to 4 items below
         cur.execute("""
             SELECT quality, url, file_id
             FROM movie_files
@@ -893,7 +894,14 @@ def get_all_movie_qualities(movie_id):
                 ELSE 6
             END
         """, (movie_id,))
-        quality_results = cur.fetchall()
+        
+        raw_results = cur.fetchall()
+        
+        # FIX: Convert 3-item tuples to 4-item tuples (adding None for file_size)
+        # Structure: (quality, url, file_id, file_size)
+        quality_results = []
+        for row in raw_results:
+            quality_results.append((row[0], row[1], row[2], None))
 
         # 2. Fetch the main generic URL from movies table
         cur.execute("SELECT url FROM movies WHERE id = %s", (movie_id,))
@@ -904,7 +912,8 @@ def get_all_movie_qualities(movie_id):
         # Add the main URL to the top of the list if it exists
         if main_res and main_res[0] and main_res[0].strip():
             # Label it nicely, e.g., "Stream / Watch Online"
-            final_results.append(('Stream / Watch Online', main_res[0].strip(), None))
+            # FIX: Added None as the 4th item here as well
+            final_results.append(('Stream / Watch Online', main_res[0].strip(), None, None))
             
         # Add the rest of the qualities
         final_results.extend(quality_results)
@@ -917,8 +926,6 @@ def get_all_movie_qualities(movie_id):
     finally:
         if conn:
             conn.close()
-
-
 def create_quality_selection_keyboard(movie_id, title, qualities):
     """Create inline keyboard with quality selection buttons showing SIZE"""
     keyboard = []
@@ -1603,8 +1610,7 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
             chosen_file = None
             
-            # --- FIX IS BELOW THIS LINE ---
-            # We added 'file_size' to the unpacking because the DB function returns 4 values now
+            # This loop expects 4 items. The fix above ensures qualities has 4 items.
             for quality, url, file_id, file_size in movie_data['qualities']:
                 if quality == selected_quality:
                     chosen_file = {'url': url, 'file_id': file_id}
