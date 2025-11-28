@@ -1584,57 +1584,51 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 parse_mode='Markdown'
             )
 
-        # --- QUALITY SELECTION HANDLER (NEW) ---
+        # ==================== QUALITY SELECTION ====================
         elif query.data.startswith("quality_"):
-            # Format: 'quality_<movie_id>_<quality>'
             parts = query.data.split('_')
             movie_id = int(parts[1])
             selected_quality = parts[2]
 
-            # Retrieve movie data from user_data
             movie_data = context.user_data.get('selected_movie_data')
 
-            # Fallback if session expired
             if not movie_data or movie_data.get('id') != movie_id:
                 qualities = get_all_movie_qualities(movie_id)
-                # Fetch title again
-                conn = get_db_connection()
-                cur = conn.cursor()
-                cur.execute("SELECT title FROM movies WHERE id = %s", (movie_id,))
-                t_res = cur.fetchone()
-                cur.close() 
-                conn.close()
-                title = t_res[0] if t_res else "Movie"
-                movie_data = {'id': movie_id, 'title': title, 'qualities': qualities}
+                # Note: qualities now contains (quality, url, file_id, file_size)
+                movie_data = {'id': movie_id, 'title': 'Movie', 'qualities': qualities}
 
             if not movie_data or 'qualities' not in movie_data:
                 await query.edit_message_text("❌ Error: Could not retrieve movie data. Please search again.")
                 return
 
-            # Find the specific link/file_id for the chosen quality
             chosen_file = None
-            for quality, url, file_id in movie_data['qualities']:
+            
+            # --- FIX IS BELOW THIS LINE ---
+            # We added 'file_size' to the unpacking because the DB function returns 4 values now
+            for quality, url, file_id, file_size in movie_data['qualities']:
                 if quality == selected_quality:
                     chosen_file = {'url': url, 'file_id': file_id}
                     break
+            # -----------------------------
 
             if not chosen_file:
-                 await query.edit_message_text("❌ Error fetching the file for that quality.")
-                 return
+                await query.edit_message_text("❌ Error fetching the file for that quality.")
+                return
 
             title = movie_data['title']
-            await query.edit_message_text(f"✅ Sending **{title}** ({selected_quality})...", parse_mode='Markdown')
+            await query.edit_message_text(f"Sending **{title}**...", parse_mode='Markdown')
 
-            # Send the specific file/link
             await send_movie_to_user(
-                update, context, movie_id, title,
-                chosen_file['url'], chosen_file['file_id']
+                update,
+                context,
+                movie_id,
+                title,
+                chosen_file['url'],
+                chosen_file['file_id']
             )
 
-            # Cleanup
             if 'selected_movie_data' in context.user_data:
                 del context.user_data['selected_movie_data']
-
         # --- ADMIN HANDLERS ---
         elif query.data.startswith("admin_fulfill_"):
             # Format: 'admin_fulfill_<user_id>_<movie_title>'
