@@ -8,11 +8,19 @@
         .wrap { max-width:900px; margin:20px auto; background:#1e1e1e; padding:22px; border-radius:8px; }
         input, textarea { width:100%; padding:10px; margin-top:8px; border-radius:6px; border:1px solid #333; background:#0f0f0f; color:#fff; }
         label { display:block; margin-top:12px; color:#bbb; }
-        .qualities { display:grid; grid-template-columns:1fr 1fr; gap:12px; margin-top:8px; }
+        
+        /* Updated Grid for Qualities (Single column for better fit) */
+        .qualities { display:grid; grid-template-columns:1fr; gap:15px; margin-top:8px; }
+        
+        /* Flexbox for Link + Size in one line */
+        .q-row { display: flex; gap: 10px; align-items: center; }
+        .q-row input:first-child { flex: 3; } /* Link gets 75% space */
+        .q-row input:last-child { flex: 1; }  /* Size gets 25% space */
+
         .actions { display:flex; gap:12px; margin-top:18px; }
         button { padding:10px 16px; border-radius:999px; border:none; background:#00d4ff; color:#111; font-weight:bold; cursor:pointer; }
         .flash { padding:8px; margin-bottom:10px; border-radius:6px; background:#2a2a2a; border:1px solid #444; color:#fff; }
-        small { color:#999; }
+        small { color:#999; display:block; margin-bottom:4px; }
     </style>
 </head>
 <body>
@@ -33,31 +41,54 @@
             <label>Description</label>
             <textarea name="description" rows="3" placeholder="Brief plot..."></textarea>
 
-            <label>Download Links / File IDs (fill one or more)</label>
+            <label>Download Links / File IDs & Sizes</label>
             <div class="qualities">
                 <div>
                     <small>Default Url (Stream/General)</small>
-                    <input name="url" type="text" placeholder="General Url link or file id">
+                    <div class="q-row">
+                        <input name="url" type="text" placeholder="General Url link or file id">
+                        <input name="s_url" type="text" placeholder="Size (e.g. 700MB)">
+                    </div>
                 </div>
+
                 <div>
                     <small>360p (Low)</small>
-                    <input name="q_360" type="text" placeholder="360p link or file id">
+                    <div class="q-row">
+                        <input name="q_360" type="text" placeholder="360p link or file id">
+                        <input name="s_360" type="text" placeholder="Size (e.g. 300MB)">
+                    </div>
                 </div>
+
                 <div>
                     <small>480p (SD)</small>
-                    <input name="q_480" type="text" placeholder="480p link or file id">
+                    <div class="q-row">
+                        <input name="q_480" type="text" placeholder="480p link or file id">
+                        <input name="s_480" type="text" placeholder="Size (e.g. 500MB)">
+                    </div>
                 </div>
+
                 <div>
                     <small>720p (Standard)</small>
-                    <input name="q_720" type="text" placeholder="720p link or file id">
+                    <div class="q-row">
+                        <input name="q_720" type="text" placeholder="720p link or file id">
+                        <input name="s_720" type="text" placeholder="Size (e.g. 1.2GB)">
+                    </div>
                 </div>
+
                 <div>
                     <small>1080p (HD)</small>
-                    <input name="q_1080" type="text" placeholder="1080p link or file id">
+                    <div class="q-row">
+                        <input name="q_1080" type="text" placeholder="1080p link or file id">
+                        <input name="s_1080" type="text" placeholder="Size (e.g. 2.5GB)">
+                    </div>
                 </div>
+
                 <div>
                     <small>2160p (4K)</small>
-                    <input name="q_2160" type="text" placeholder="4K link or file id">
+                    <div class="q-row">
+                        <input name="q_2160" type="text" placeholder="4K link or file id">
+                        <input name="s_2160" type="text" placeholder="Size (e.g. 6GB)">
+                    </div>
                 </div>
             </div>
 
@@ -73,7 +104,10 @@
 
         <hr style="margin:20px 0; border-color:#222;">
         <h3>Bulk upload CSV</h3>
-        <p>CSV columns: Title,Description,Url,URL_360,URL_480,URL_720,URL_1080,URL_2160,Aliases</p>
+        <p style="color:#bbb; font-size:0.9rem;">
+            <strong>CSV Column Order:</strong><br>
+            Title, Description, Url, Size_Url, URL_360, Size_360, URL_480, Size_480, URL_720, Size_720, URL_1080, Size_1080, URL_2160, Size_2160, Aliases
+        </p>
         <form method="post" action="{{ url_for('admin.bulk_upload') }}" enctype="multipart/form-data">
             <input type="file" name="csvfile" accept=".csv" required>
             <div style="margin-top:12px;">
