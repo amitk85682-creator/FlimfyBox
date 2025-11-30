@@ -927,25 +927,37 @@ def get_all_movie_qualities(movie_id):
         if conn:
             conn.close()
 def create_quality_selection_keyboard(movie_id, title, qualities):
-    """Create inline keyboard with quality selection buttons showing SIZE"""
-    keyboard = []
-
-    # Note: qualities tuple ab 4 items ka hai -> (quality, url, file_id, file_size)
-    for quality, url, file_id, file_size in qualities:
-        callback_data = f"quality_{movie_id}_{quality}"
+    """Create keyboard WITH SIZE display"""
+    try:
+        keyboard = []
         
-        # Agar size available hai to dikhayein, nahi to sirf Quality dikhayein
-        size_text = f" - {file_size}" if file_size else ""
-        link_type = "File" if file_id else "Link"
+        # Row structure: (quality, url, file_id, file_size)
+        for quality, url, file_id, file_size in qualities:
+            
+            # Size display logic
+            size_text = f" • {file_size}" if file_size else ""
+            
+            # Icon logic
+            if "Stream" in quality:
+                icon = "📺"
+            elif file_id:
+                icon = "📁"
+            else:
+                icon = "🔗"
+            
+            button_text = f"{icon} {quality}{size_text}"
+            
+            # Clean callback data
+            safe_quality = quality.replace(' ', '_').replace('/', '_')
+            
+            keyboard.append([InlineKeyboardButton(button_text, callback_data=f"quality_{movie_id}_{safe_quality}")])
         
-        # Button text example: "🎬 720p - 1.4GB (Link)"
-        button_text = f"🎬 {quality}{size_text} ({link_type})"
+        keyboard.append([InlineKeyboardButton("❌ Cancel", callback_data="cancel_selection")])
         
-        keyboard.append([InlineKeyboardButton(button_text, callback_data=callback_data)])
-
-    keyboard.append([InlineKeyboardButton("❌ Cancel Selection", callback_data="cancel_selection")])
-
-    return InlineKeyboardMarkup(keyboard)
+        return InlineKeyboardMarkup(keyboard)
+    except Exception as e:
+        logger.error(f"Error creating quality keyboard: {e}")
+        return None
 # ==================== HELPER FUNCTION (FIXED FOR QUALITY CHOICE) ====================
 async def send_movie_to_user(update: Update, context: ContextTypes.DEFAULT_TYPE, movie_id: int, title: str, url: Optional[str] = None, file_id: Optional[str] = None):
     """
