@@ -1160,7 +1160,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """
     try:
         # Check for deep link payload
-        if context.args and context.args[0]:
+        if context.args and len(context.args) > 0:
             payload = context.args[0]
             
             # --- CASE 1: DIRECT MOVIE ID (e.g., movie_123) ---
@@ -1168,18 +1168,32 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 try:
                     movie_id = int(payload.split('_')[1])
                     chat_id = update.effective_chat.id
+                    
+                    # Deliver movie
                     asyncio.create_task(deliver_movie_on_start(context, movie_id, chat_id))
+                    
+                    return MAIN_MENU  # ✅ RETURN ADDED!
+                    
                 except (IndexError, ValueError) as e:
                     logger.error(f"Error processing movie link: {e}")
                     await update.message.reply_text("❌ Invalid link.")
+                    return MAIN_MENU  # ✅ RETURN ADDED!
             
             # --- CASE 2: AUTO SEARCH (e.g., q_Family_Man) ---
             elif payload.startswith("q_"):
                 # Decode query: q_Family_Man -> Family Man
-                query_text = payload.replace("q_", "").replace("_", " ")
+                query_text = payload.replace("q_", "", 1)  # Sirf pehla "q_" remove
+                query_text = query_text.replace("_", " ")  # Underscores to spaces
+                query_text = " ".join(query_text.split())  # Multiple spaces fix
                 
-                # Update user message object to simulate text input
-                # This makes search_movies() think the user typed the name
+                logger.info(f"Deep link search query: {query_text}")
+                
+                # Safety check
+                if not query_text.strip():
+                    await update.message.reply_text("❌ Invalid search query.")
+                    return MAIN_MENU
+                
+                # Update message text for search
                 update.message.text = query_text
                 
                 # Call search function directly
@@ -1188,7 +1202,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     except Exception as e:
         logger.error(f"Error in start: {e}")
 
-    # --- NORMAL WELCOME MESSAGE ---
+    # --- NORMAL WELCOME MESSAGE (Fallback) ---
     welcome_text = """
 📨 Sᴇɴᴅ Mᴏᴠɪᴇ Oʀ Sᴇʀɪᴇs Nᴀᴍᴇ ᴀɴᴅ Yᴇᴀʀ Aꜱ Pᴇʀ Gᴏᴏɢʟᴇ Sᴘᴇʟʟɪɴɢ..!! 👍
 
