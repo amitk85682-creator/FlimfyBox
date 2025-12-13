@@ -1152,32 +1152,51 @@ async def deliver_movie_on_start(context: ContextTypes.DEFAULT_TYPE, movie_id: i
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """
-    Start command handler. Handles both normal starts and deep links for movie delivery.
+    Start command handler. 
+    Handles:
+    1. Normal start (/start)
+    2. Deep links for direct movie delivery (/start movie_123)
+    3. Auto-search deep links from channel (/start q_MovieName)
     """
-    # Check for deep link payload (e.g., /start movie_123)
-    if context.args and context.args[0].startswith("movie_"):
-        try:
-            movie_id = int(context.args[0].split('_')[1])
-            chat_id = update.effective_chat.id
-            # Schedule the movie delivery to run in the background
-            asyncio.create_task(deliver_movie_on_start(context, movie_id, chat_id))
-        except (IndexError, ValueError) as e:
-            logger.error(f"Error processing deep link payload: {context.args[0]} - {e}")
-            await update.message.reply_text("Sorry, that's an invalid movie link.")
+    try:
+        # Check for deep link payload
+        if context.args and context.args[0]:
+            payload = context.args[0]
+            
+            # --- CASE 1: DIRECT MOVIE ID (e.g., movie_123) ---
+            if payload.startswith("movie_"):
+                try:
+                    movie_id = int(payload.split('_')[1])
+                    chat_id = update.effective_chat.id
+                    asyncio.create_task(deliver_movie_on_start(context, movie_id, chat_id))
+                except (IndexError, ValueError) as e:
+                    logger.error(f"Error processing movie link: {e}")
+                    await update.message.reply_text("❌ Invalid link.")
+            
+            # --- CASE 2: AUTO SEARCH (e.g., q_Family_Man) ---
+            elif payload.startswith("q_"):
+                # Decode query: q_Family_Man -> Family Man
+                query_text = payload.replace("q_", "").replace("_", " ")
+                
+                # Update user message object to simulate text input
+                # This makes search_movies() think the user typed the name
+                update.message.text = query_text
+                
+                # Call search function directly
+                return await search_movies(update, context)
 
-    # ALWAYS show the welcome message and start the main menu conversation
+    except Exception as e:
+        logger.error(f"Error in start: {e}")
+
+    # --- NORMAL WELCOME MESSAGE ---
     welcome_text = """
 📨 Sᴇɴᴅ Mᴏᴠɪᴇ Oʀ Sᴇʀɪᴇs Nᴀᴍᴇ ᴀɴᴅ Yᴇᴀʀ Aꜱ Pᴇʀ Gᴏᴏɢʟᴇ Sᴘᴇʟʟɪɴɢ..!! 👍
 
 ⚠️ Exᴀᴍᴘʟᴇ Fᴏʀ Mᴏᴠɪᴇ 👇
-
-👉 Jailer
 👉 Jailer 2023
 
 ⚠️ Exᴀᴍᴘʟᴇ Fᴏʀ WᴇʙSᴇʀɪᴇs 👇
-
-👉 Stranger Things
-👉 Stranger Things S02 E04
+👉 Stranger Things S02
 
 ⚠️ ᴅᴏɴ'ᴛ ᴀᴅᴅ ᴇᴍᴏᴊɪꜱ ᴀɴᴅ ꜱʏᴍʙᴏʟꜱ ɪɴ ᴍᴏᴠɪᴇ ɴᴀᴍᴇ, ᴜꜱᴇ ʟᴇᴛᴛᴇʀꜱ ᴏɴʟʏ..!! ❌
 """
