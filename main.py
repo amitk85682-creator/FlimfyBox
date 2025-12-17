@@ -870,6 +870,7 @@ def create_movie_selection_keyboard(movies, page=0, movies_per_page=5):
 
     return InlineKeyboardMarkup(keyboard)
 
+# 👇 REPLACE THIS FUNCTION 👇
 def get_all_movie_qualities(movie_id):
     """Fetch all available qualities (URL/File ID) including the main generic URL."""
     conn = get_db_connection()
@@ -879,43 +880,29 @@ def get_all_movie_qualities(movie_id):
     try:
         cur = conn.cursor()
         
-        # 1. Fetch specific qualities from movie_files table
-        # We fetch 3 columns, but we will pad the result to 4 items below
+        # 1. Fetch files from movie_files table (Updated for Batch Support)
+        # We now fetch 'file_size' from DB and sort by ID DESC (Newest first)
         cur.execute("""
-            SELECT quality, url, file_id
+            SELECT quality, url, file_id, file_size
             FROM movie_files
             WHERE movie_id = %s AND (url IS NOT NULL OR file_id IS NOT NULL)
-            ORDER BY CASE quality
-                WHEN '4K' THEN 1
-                WHEN 'HD Quality' THEN 2
-                WHEN 'Standard Quality'  THEN 3
-                WHEN 'SD Quality' THEN 4
-                WHEN 'Low Quality'  THEN 5
-                ELSE 6
-            END
+            ORDER BY id DESC
         """, (movie_id,))
         
-        raw_results = cur.fetchall()
-        
-        # FIX: Convert 3-item tuples to 4-item tuples (adding None for file_size)
-        # Structure: (quality, url, file_id, file_size)
-        quality_results = []
-        for row in raw_results:
-            quality_results.append((row[0], row[1], row[2], None))
+        quality_results = cur.fetchall() # Returns list of (quality, url, file_id, file_size)
 
-        # 2. Fetch the main generic URL from movies table
+        # 2. Fetch the main generic URL from movies table (Stream Link)
         cur.execute("SELECT url FROM movies WHERE id = %s", (movie_id,))
         main_res = cur.fetchone()
         
         final_results = []
         
-        # Add the main URL to the top of the list if it exists
+        # Add the main URL to the top if exists
         if main_res and main_res[0] and main_res[0].strip():
-            # Label it nicely, e.g., "Stream / Watch Online"
-            # FIX: Added None as the 4th item here as well
+            # Structure: (quality, url, file_id, file_size)
             final_results.append(('Stream / Watch Online', main_res[0].strip(), None, None))
             
-        # Add the rest of the qualities
+        # Add the rest of the files
         final_results.extend(quality_results)
         
         cur.close()
@@ -926,42 +913,33 @@ def get_all_movie_qualities(movie_id):
     finally:
         if conn:
             conn.close()
+# 👇 REPLACE THIS FUNCTION 👇
 def create_quality_selection_keyboard(movie_id, title, qualities):
-
     """Create inline keyboard with quality selection buttons showing SIZE"""
-
     keyboard = []
 
-
-
-    # Note: qualities tuple ab 4 items ka hai -> (quality, url, file_id, file_size)
-
+    # Note: qualities tuple contains (quality, url, file_id, file_size)
     for quality, url, file_id, file_size in qualities:
-
         callback_data = f"quality_{movie_id}_{quality}"
-
         
-
-        # Agar size available hai to dikhayein, nahi to sirf Quality dikhayein
-
-        size_text = f" - {file_size}" if file_size else ""
-
+        # 👇 FIX: Check if size is already in the label (Batch Upload fix)
+        if "[" in quality and "]" in quality:
+            display_text = quality # Size already inside label
+        else:
+            # Old/Manual entry ke liye size jodo
+            size_part = f" - {file_size}" if file_size else ""
+            display_text = f"{quality}{size_part}"
+            
         link_type = "File" if file_id else "Link"
-
         
-
-        # Button text example: "🎬 720p - 1.4GB (Link)"
-
-        button_text = f"🎬 {quality}{size_text} ({link_type})"
-
+        # Final Button Text
+        button_text = f"🎬 {display_text} ({link_type})"
         
-
         keyboard.append([InlineKeyboardButton(button_text, callback_data=callback_data)])
-
-
 
     keyboard.append([InlineKeyboardButton("❌ Cancel Selection", callback_data="cancel_selection")])
 
+    return InlineKeyboardMarkup(keyboard)
 
 
     return InlineKeyboardMarkup(keyboard)
