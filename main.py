@@ -1098,15 +1098,23 @@ async def send_movie_to_user(update: Update, context: ContextTypes.DEFAULT_TYPE,
 # ==================== TELEGRAM BOT HANDLERS ====================
 
 # --- NEW HELPER FUNCTION FOR DEEP LINK ---
-async def deliver_movie_on_start(context: ContextTypes.DEFAULT_TYPE, movie_id: int, chat_id: int):
+async def deliver_movie_on_start(update: Update, context: ContextTypes.DEFAULT_TYPE, movie_id: int):
     """
-    Fetches and sends a movie. Designed to be run as a separate task
-    to not interfere with the ConversationHandler.
+    Fetches and sends a movie. Uses the REAL update object to ensure 
+    send_movie_to_user works correctly.
     """
-    await asyncio.sleep(1) # Small delay to ensure the welcome message appears first
+    # 1. User ko feedback dein ki process shuru ho gaya hai
+    chat_id = update.effective_chat.id
+    status_msg = None
+    try:
+        status_msg = await context.bot.send_message(chat_id, "⚡ Checking movie details...")
+    except:
+        pass
+
     conn = get_db_connection()
     if not conn:
-        await context.bot.send_message(chat_id, "Database connection failed. Please try searching for the movie again.")
+        if status_msg: await status_msg.delete()
+        await context.bot.send_message(chat_id, "❌ Database connection failed.")
         return
 
     try:
@@ -1116,16 +1124,23 @@ async def deliver_movie_on_start(context: ContextTypes.DEFAULT_TYPE, movie_id: i
         cur.close()
         conn.close()
 
+        if status_msg: 
+            try: await status_msg.delete() 
+            except: pass
+
         if movie_data:
             title, url, file_id = movie_data
-            # We need a dummy Update object to pass to send_movie_to_user
-            dummy_update = Update(update_id=0, message=telegram.Message(message_id=0, date=datetime.now(), chat=telegram.Chat(id=chat_id, type='private')))
-            await send_movie_to_user(dummy_update, context, movie_id, title, url, file_id)
+            # 2. Asli 'update' object pass karein (Dummy banane ki zaroorat nahi)
+            await send_movie_to_user(update, context, movie_id, title, url, file_id)
         else:
-            await context.bot.send_message(chat_id, "Sorry, I couldn't find the movie associated with that link. It might have been removed.")
+            await context.bot.send_message(chat_id, "❌ Sorry, movie data not found. It might have been deleted.")
+            
     except Exception as e:
         logger.error(f"Error in deliver_movie_on_start: {e}")
-        await context.bot.send_message(chat_id, "Sorry, an error occurred while trying to send your movie.")
+        if status_msg: 
+            try: await status_msg.delete() 
+            except: pass
+        await context.bot.send_message(chat_id, "❌ Error sending movie.")
 
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -1145,10 +1160,10 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
             if payload.startswith("movie_"):
                 try:
                     movie_id = int(payload.split('_')[1])
-                    chat_id = update.effective_chat.id
                     
-                    # Deliver movie
-                    asyncio.create_task(deliver_movie_on_start(context, movie_id, chat_id))
+                    # FIX: Yahan hum 'update' pass kar rahe hain aur 'chat_id' hata diya hai
+                    asyncio.create_task(deliver_movie_on_start(update, context, movie_id))
+                    
                     return MAIN_MENU
                     
                 except (IndexError, ValueError) as e:
