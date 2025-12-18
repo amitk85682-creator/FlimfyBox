@@ -3087,17 +3087,18 @@ def main():
 
     application = Application.builder().token(TELEGRAM_BOT_TOKEN).read_timeout(30).write_timeout(30).build()
 
-    # Conversation handler for user interaction flow in private chat
+    # Conversation handler for user interaction flow
     conv_handler = ConversationHandler(
-        entry_points=[CommandHandler('start', start, filters=filters.ChatType.PRIVATE)], # <--- यहाँ फिल्टर जोड़ें
+        entry_points=[CommandHandler('start', start, filters=filters.ChatType.PRIVATE)],
         states={
-            MAIN_MENU: [MessageHandler(filters.TEXT & ~filters.COMMAND & filters.ChatType.PRIVATE, main_menu)], # <--- यहाँ फिल्टर जोड़ें
-            SEARCHING: [MessageHandler(filters.TEXT & ~filters.COMMAND & filters.ChatType.PRIVATE, search_movies)], # <--- यहाँ फिल्टर जोड़ें
-            REQUESTING: [MessageHandler(filters.TEXT & ~filters.COMMAND & filters.ChatType.PRIVATE, request_movie)], # <--- यहाँ फिल्टर जोड़ें
+            MAIN_MENU: [MessageHandler(filters.TEXT & ~filters.COMMAND & filters.ChatType.PRIVATE, main_menu)],
+            SEARCHING: [MessageHandler(filters.TEXT & ~filters.COMMAND & filters.ChatType.PRIVATE, search_movies)],
+            REQUESTING: [MessageHandler(filters.TEXT & ~filters.COMMAND & filters.ChatType.PRIVATE, request_movie)],
         },
-        fallbacks=[CommandHandler('cancel', cancel, filters=filters.ChatType.PRIVATE)], # <--- यहाँ फिल्टर जोड़ें
+        fallbacks=[CommandHandler('cancel', cancel, filters=filters.ChatType.PRIVATE)],
         per_message=False,
         per_chat=True,
+        allow_reentry=True  # ✅✅✅ YE LINE ADD KARNI HAI BAS ✅✅✅
     )
 
     # Register callback handler FIRST to prioritize button clicks over text messages.
