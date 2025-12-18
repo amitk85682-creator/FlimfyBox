@@ -16,6 +16,7 @@ import requests
 import signal
 import sys
 import re
+background_tasks = set()
 from bs4 import BeautifulSoup
 import telegram
 import psycopg2
@@ -1095,50 +1096,50 @@ async def send_movie_to_user(update: Update, context: ContextTypes.DEFAULT_TYPE,
         except Exception as e2:
             logger.error(f"Secondary send error: {e2}")
 
-# ==================== TELEGRAM BOT HANDLERS ====================
-
-# --- NEW HELPER FUNCTION FOR DEEP LINK ---
+# ==================== NEW MISSING FUNCTION ====================
 async def deliver_movie_on_start(update: Update, context: ContextTypes.DEFAULT_TYPE, movie_id: int):
     """
-    Fetches and sends a movie. Uses the REAL update object to ensure 
-    send_movie_to_user works correctly.
+    Background task to fetch and send movie safely via Deep Link.
     """
-    # 1. User ko feedback dein ki process shuru ho gaya hai
     chat_id = update.effective_chat.id
+    
+    # 1. Processing Message (User ko pata chale bot kaam kar raha hai)
     status_msg = None
     try:
-        status_msg = await context.bot.send_message(chat_id, "⚡ Checking movie details...")
+        status_msg = await context.bot.send_message(chat_id, "⚡ Finding your movie...")
     except:
         pass
 
-    conn = get_db_connection()
-    if not conn:
-        if status_msg: await status_msg.delete()
-        await context.bot.send_message(chat_id, "❌ Database connection failed.")
-        return
-
+    conn = None
     try:
+        conn = get_db_connection()
+        if not conn:
+            if status_msg: await status_msg.delete()
+            await context.bot.send_message(chat_id, "❌ Database connection failed.")
+            return
+
         cur = conn.cursor()
         cur.execute("SELECT title, url, file_id FROM movies WHERE id = %s", (movie_id,))
         movie_data = cur.fetchone()
         cur.close()
         conn.close()
 
-        if status_msg: 
-            try: await status_msg.delete() 
+        # Loading message delete karein
+        if status_msg:
+            try: await status_msg.delete()
             except: pass
 
         if movie_data:
             title, url, file_id = movie_data
-            # 2. Asli 'update' object pass karein (Dummy banane ki zaroorat nahi)
+            # 2. Main send function call karein (Update pass karna zaroori hai)
             await send_movie_to_user(update, context, movie_id, title, url, file_id)
         else:
-            await context.bot.send_message(chat_id, "❌ Sorry, movie data not found. It might have been deleted.")
-            
+            await context.bot.send_message(chat_id, "❌ Movie not found (Link Expired or Deleted).")
+
     except Exception as e:
         logger.error(f"Error in deliver_movie_on_start: {e}")
-        if status_msg: 
-            try: await status_msg.delete() 
+        if status_msg:
+            try: await status_msg.delete()
             except: pass
         await context.bot.send_message(chat_id, "❌ Error sending movie.")
 
@@ -1161,8 +1162,12 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 try:
                     movie_id = int(payload.split('_')[1])
                     
-                    # FIX: Yahan hum 'update' pass kar rahe hain aur 'chat_id' hata diya hai
-                    asyncio.create_task(deliver_movie_on_start(update, context, movie_id))
+                    # ✅ FIX: Task create karein aur 'update' pass karein
+                    task = asyncio.create_task(deliver_movie_on_start(update, context, movie_id))
+                    
+                    # Task ko global set me add karein (Garbage Collection rokne ke liye)
+                    background_tasks.add(task)
+                    task.add_done_callback(background_tasks.discard)
                     
                     return MAIN_MENU
                     
