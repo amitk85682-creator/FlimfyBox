@@ -2230,10 +2230,8 @@ Movie2 file_id_here
                 conn.close()
                 success_count += 1
                 results.append(f"✅ {title}")
-            except Exception as 
-
-iske aage ka code
-            except Exception as e:
+except Exception as 
+except Exception as e:
                 failed_count += 1
                 results.append(f"❌ {title} - {str(e)}")
 
