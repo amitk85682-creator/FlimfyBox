@@ -2203,18 +2203,29 @@ async def notify_manually(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text(f"एक एरर आया: {e}")
 
 async def notify_user_by_username(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Send text notification to specific user"""
+    """Send text notification to specific user (Preserves Line Breaks)"""
     if update.effective_user.id != ADMIN_USER_ID:
         await update.message.reply_text("⛔ Admin only command.")
         return
 
     try:
+        # Check basic length
         if not context.args or len(context.args) < 2:
             await update.message.reply_text("Usage: /notifyuser @username Your message here")
             return
 
-        target_username = context.args[0].replace('@', '')
-        message_text = ' '.join(context.args[1:])
+        # --- LOGIC CHANGE FOR NEW LINES ---
+        # Ham args ki jagah raw text ko split karenge taaki 'Enter' na hate
+        # text.split(None, 2) => [command, username, message_body]
+        parts = update.message.text.split(None, 2)
+        
+        if len(parts) < 3:
+             await update.message.reply_text("Message text missing.")
+             return
+
+        target_username = parts[1].replace('@', '')
+        message_text = parts[2] # Ye wesa hi rahega jesa apne type kiya (with enters)
+        # ----------------------------------
 
         conn = get_db_connection()
         if not conn:
@@ -2236,13 +2247,13 @@ async def notify_user_by_username(update: Update, context: ContextTypes.DEFAULT_
 
         user_id, first_name = user
 
-        # ✅ FIX: Changed header to HTML syntax (<b>...</b>)
+        # Header with HTML
         notification_text = f"<b>📬 Message from Admin</b>\n\n{message_text}"
 
         await context.bot.send_message(
             chat_id=user_id,
             text=notification_text,
-            parse_mode='HTML',  # ✅ FIX: Changed from Markdown to HTML
+            parse_mode='HTML', # HTML Tags kaam karenge
             disable_web_page_preview=True
         )
 
