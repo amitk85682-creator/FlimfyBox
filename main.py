@@ -2236,12 +2236,14 @@ async def notify_user_by_username(update: Update, context: ContextTypes.DEFAULT_
 
         user_id, first_name = user
 
-        notification_text = f"📬 **Message from Admin**\n\n{message_text}"
+        # ✅ FIX: Changed header to HTML syntax (<b>...</b>)
+        notification_text = f"<b>📬 Message from Admin</b>\n\n{message_text}"
 
         await context.bot.send_message(
             chat_id=user_id,
             text=notification_text,
-            parse_mode='Markdown'
+            parse_mode='HTML',  # ✅ FIX: Changed from Markdown to HTML
+            disable_web_page_preview=True
         )
 
         await update.message.reply_text(f"✅ Message sent to `@{target_username}` ({first_name})", parse_mode='Markdown')
