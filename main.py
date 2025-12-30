@@ -503,6 +503,53 @@ def get_movies_from_db(user_query, limit=10):
                 conn.close()
             except:
                 pass
+
+# 👇👇👇 IS FUNCTION KO 'get_movies_from_db' KE NEECHE PASTE KARO 👇👇👇
+
+def get_movies_fast_sql(query: str, limit: int = 5):
+    """
+    Smart SQL Search: Fast like SQL + Smart like FuzzyWuzzy.
+    Handles typos using PostgreSQL 'pg_trgm' (Similarity).
+    """
+    conn = None
+    try:
+        conn = get_db_connection()
+        if not conn:
+            return []
+
+        cur = conn.cursor()
+        
+        # 1. Pehle ensure karo ki extension enable hai (One time check)
+        cur.execute("CREATE EXTENSION IF NOT EXISTS pg_trgm;")
+        
+        # 2. Smart Query (SIMILARITY > 0.3)
+        sql = """
+            SELECT m.id, m.title, m.url, m.file_id, 
+                   SIMILARITY(m.title, %s) as sim_score
+            FROM movies m
+            WHERE SIMILARITY(m.title, %s) > 0.3
+            ORDER BY sim_score DESC
+            LIMIT %s
+        """
+        
+        cur.execute(sql, (query, query, limit))
+        results = cur.fetchall()
+        
+        # Format results (ID, Title, Url, FileID)
+        final_results = [(r[0], r[1], r[2], r[3]) for r in results]
+        
+        cur.close()
+        return final_results
+
+    except Exception as e:
+        logger.error(f"Smart SQL Search Error: {e}")
+        return []
+    finally:
+        if conn:
+            try:
+                conn.close()
+            except:
+                pass
 # ==================== STORE USER REQUEST (fixed) ====================
 def store_user_request(user_id, username, first_name, movie_title, group_id=None, message_id=None):
     """Store user request in database. Uses ON CONFLICT DO UPDATE to refresh timestamp for exact duplicates."""
@@ -1501,54 +1548,49 @@ async def request_movie(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("Sorry, an error occurred while processing your request.")
         return REQUESTING
 
-# ==================== NEW: GROUP MESSAGE HANDLER ====================
-async def group_message_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
+# 👇👇👇 PURANE 'group_message_handler' KO HATA KAR YE PASTE KARO 👇👇👇
+
+async def handle_group_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """
-    Listens to all messages in a group, and if a message matches a movie
-    in the database with high confidence, it prompts the user.
+    Handle messages in groups using FAST SQL Search.
+    Agar movie database me hai to reply karega, nahi to chup rahega.
     """
-    # Ensure it's a text message and not from the bot itself
-    if not update.message or not update.message.text or update.message.from_user.is_bot:
+    if not update.message or not update.message.text:
+        return
+    
+    text = update.message.text.strip()
+    
+    # 1. Commands ignore karo
+    if text.startswith('/'):
+        return
+    
+    # 2. Bahut chote words ignore karo
+    if len(text) < 2:
         return
 
-    message_text = update.message.text.strip()
-    user = update.effective_user
+    # 3. 🚀 FAST SEARCH CALL (Sirf SQL Check - No Python Lag)
+    movies = get_movies_fast_sql(text, limit=5)
 
-    # Avoid triggering on very short messages or commands
-    if len(message_text) < 4 or message_text.startswith('/'):
+    if not movies:
+        # 🤫 Agar movie nahi mili, to YAHIN RUK JAO. (Silent Mode)
+        # Bot kuch reply nahi karega, group me shanti rahegi.
         return
 
-    # Use a precise search to find one potential match
-    movies_found = get_movies_from_db(message_text, limit=1)
+    # 4. Results mil gaye, ab show karo
+    context.user_data['search_results'] = movies
+    context.user_data['search_query'] = text
 
-    if movies_found:
-        # Check if the match is good enough to avoid false positives
-        match_title = movies_found[0][1]
-        score = fuzz.token_sort_ratio(_normalize_title_for_match(message_text), _normalize_title_for_match(match_title))
-
-        # Use a high confidence threshold for group prompts
-        if score > 85: # (हमने इसे 85 कर दिया था, आप चाहें तो 90 रख सकते हैं)
-            movie_id, title, _, _ = movies_found[0]
-
-            # <<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<
-            # हमने यहां से 10-मिनट के कूलडाउन वाला पूरा कोड ब्लॉक हटा दिया है।
-            # >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
-
-            keyboard = InlineKeyboardMarkup([[
-                InlineKeyboardButton("✅ Yes, get this movie", callback_data=f"group_get_{movie_id}_{user.id}")
-            ]])
-
-            # Reply to the user's message, mentioning them
-            reply_msg = await update.message.reply_text(
-                text=f"Hey {user.mention_markdown()}, are you looking for **{title}**? Click the button to get it.",
-                reply_markup=keyboard,
-                parse_mode='Markdown'
-            )
-
-            # Schedule the prompt message to be deleted after 2 minutes to keep the chat clean
-            asyncio.create_task(
-                delete_messages_after_delay(context, update.effective_chat.id, [reply_msg.message_id], delay=120)
-            )
+    keyboard = create_movie_selection_keyboard(movies, page=0)
+    
+    # Reply to user
+    msg = await update.message.reply_text(
+        f"🎬 **Found {len(movies)} results for '{text}'**\n👇 Select movie:",
+        reply_markup=keyboard,
+        parse_mode='Markdown'
+    )
+    
+    # Auto-delete (2 min)
+    track_message_for_deletion(context, update.effective_chat.id, msg.message_id, 120)
 
 async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Handle inline button callbacks - INCLUDING MOVIE SELECTION"""
@@ -3121,7 +3163,7 @@ def main():
     # The handler will listen to text messages in groups that are not commands.
     application.add_handler(MessageHandler(
         filters.TEXT & ~filters.COMMAND & filters.ChatType.GROUPS,
-        group_message_handler
+        handle_group_message
     ))
 
     # Add the main conversation handler for private chats and direct commands
