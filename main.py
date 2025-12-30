@@ -506,14 +506,14 @@ def get_movies_from_db(user_query, limit=10):
 
 # 👇👇👇 IS FUNCTION KO 'get_movie_by_id' KE NEECHE PASTE KARO 👇👇👇
 
-def get_movies_fast_sql(query: str, limit: int = 5) -> List[Tuple]:
+def get_movies_fast_sql(query, limit=5):
     """
     Smart SQL Search: Fast like SQL + Smart like FuzzyWuzzy.
     Handles typos using PostgreSQL 'pg_trgm' (Similarity).
     """
     conn = None
     try:
-        conn = get_db() # Pool connection
+        conn = get_db_connection() # ✅ Tumhare script ke hisab se connection
         if not conn:
             return []
 
@@ -522,12 +522,13 @@ def get_movies_fast_sql(query: str, limit: int = 5) -> List[Tuple]:
         # 1. Extension Enable
         cur.execute("CREATE EXTENSION IF NOT EXISTS pg_trgm;")
         
-        # 2. Smart Query (Similarity > 0.3)
+        # 2. Smart Query
+        # Note: Alias support hata diya hai agar table nahi hai to error na aye
         sql = """
-            SELECT m.id, m.title, m.url, m.file_id, 
-                   SIMILARITY(m.title, %s) as sim_score
-            FROM movies m
-            WHERE SIMILARITY(m.title, %s) > 0.3
+            SELECT id, title, url, file_id, 
+                   SIMILARITY(title, %s) as sim_score
+            FROM movies
+            WHERE SIMILARITY(title, %s) > 0.3
             ORDER BY sim_score DESC
             LIMIT %s
         """
@@ -546,7 +547,10 @@ def get_movies_fast_sql(query: str, limit: int = 5) -> List[Tuple]:
         return []
     finally:
         if conn:
-            release_db(conn) # Connection wapis pool me
+            try:
+                conn.close()
+            except:
+                pass
 # ==================== STORE USER REQUEST (fixed) ====================
 def store_user_request(user_id, username, first_name, movie_title, group_id=None, message_id=None):
     """Store user request in database. Uses ON CONFLICT DO UPDATE to refresh timestamp for exact duplicates."""
