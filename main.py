@@ -504,25 +504,25 @@ def get_movies_from_db(user_query, limit=10):
             except:
                 pass
 
-# 👇👇👇 IS FUNCTION KO 'get_movies_from_db' KE NEECHE PASTE KARO 👇👇👇
+# 👇👇👇 IS FUNCTION KO 'get_movie_by_id' KE NEECHE PASTE KARO 👇👇👇
 
-def get_movies_fast_sql(query: str, limit: int = 5):
+def get_movies_fast_sql(query: str, limit: int = 5) -> List[Tuple]:
     """
     Smart SQL Search: Fast like SQL + Smart like FuzzyWuzzy.
     Handles typos using PostgreSQL 'pg_trgm' (Similarity).
     """
     conn = None
     try:
-        conn = get_db_connection()
+        conn = get_db() # Pool connection
         if not conn:
             return []
 
         cur = conn.cursor()
         
-        # 1. Pehle ensure karo ki extension enable hai (One time check)
+        # 1. Extension Enable
         cur.execute("CREATE EXTENSION IF NOT EXISTS pg_trgm;")
         
-        # 2. Smart Query (SIMILARITY > 0.3)
+        # 2. Smart Query (Similarity > 0.3)
         sql = """
             SELECT m.id, m.title, m.url, m.file_id, 
                    SIMILARITY(m.title, %s) as sim_score
@@ -535,7 +535,7 @@ def get_movies_fast_sql(query: str, limit: int = 5):
         cur.execute(sql, (query, query, limit))
         results = cur.fetchall()
         
-        # Format results (ID, Title, Url, FileID)
+        # Format results: (id, title, url, file_id)
         final_results = [(r[0], r[1], r[2], r[3]) for r in results]
         
         cur.close()
@@ -546,10 +546,7 @@ def get_movies_fast_sql(query: str, limit: int = 5):
         return []
     finally:
         if conn:
-            try:
-                conn.close()
-            except:
-                pass
+            release_db(conn) # Connection wapis pool me
 # ==================== STORE USER REQUEST (fixed) ====================
 def store_user_request(user_id, username, first_name, movie_title, group_id=None, message_id=None):
     """Store user request in database. Uses ON CONFLICT DO UPDATE to refresh timestamp for exact duplicates."""
@@ -1548,7 +1545,7 @@ async def request_movie(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("Sorry, an error occurred while processing your request.")
         return REQUESTING
 
-# 👇👇👇 PURANE 'group_message_handler' KO HATA KAR YE PASTE KARO 👇👇👇
+# 👇👇👇 PURANE 'handle_group_mention' KO REPLACE KARKE YE PASTE KARO 👇👇👇
 
 async def handle_group_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """
@@ -1559,38 +1556,74 @@ async def handle_group_message(update: Update, context: ContextTypes.DEFAULT_TYP
         return
     
     text = update.message.text.strip()
+    bot = await context.bot.get_me()
     
     # 1. Commands ignore karo
     if text.startswith('/'):
         return
     
-    # 2. Bahut chote words ignore karo
+    # 2. Agar user ne tag kiya hai to tag hata do
+    if f"@{bot.username}" in text:
+        text = text.replace(f"@{bot.username}", "").strip()
+
+    # 3. Bahut chote words ignore karo
     if len(text) < 2:
         return
 
-    # 3. 🚀 FAST SEARCH CALL (Sirf SQL Check - No Python Lag)
-    movies = get_movies_fast_sql(text, limit=5)
+    # 4. 🚀 FAST SEARCH CALL (Sirf SQL Check)
+    movies = get_movies_fast_sql(text, limit=10)
 
     if not movies:
-        # 🤫 Agar movie nahi mili, to YAHIN RUK JAO. (Silent Mode)
-        # Bot kuch reply nahi karega, group me shanti rahegi.
+        # 🤫 Agar movie nahi mili, to YAHIN RUK JAO.
+        # Bot kuch reply nahi karega.
         return
 
-    # 4. Results mil gaye, ab show karo
-    context.user_data['search_results'] = movies
-    context.user_data['search_query'] = text
+    # 5. Result Handling
+    user_id = update.effective_user.id
 
-    keyboard = create_movie_selection_keyboard(movies, page=0)
-    
-    # Reply to user
-    msg = await update.message.reply_text(
-        f"🎬 **Found {len(movies)} results for '{text}'**\n👇 Select movie:",
-        reply_markup=keyboard,
-        parse_mode='Markdown'
-    )
-    
-    # Auto-delete (2 min)
-    track_message_for_deletion(context, update.effective_chat.id, msg.message_id, 120)
+    if len(movies) == 1:
+        # --- Case A: Single Result (Direct Button) ---
+        m = movies[0]
+        # Movie Tuple: (id, title, url, file_id)
+        
+        keyboard = InlineKeyboardMarkup([[ 
+            InlineKeyboardButton(
+                "📥 Get in DM", 
+                callback_data=f"g_{m[0]}_{user_id}"
+            )
+        ]])
+        
+        is_series_bool = is_series(m[1]) if 'is_series' in globals() else False
+        emoji = "📺" if is_series_bool else "🎬"
+
+        await update.message.reply_text(
+            f"{emoji} **{m[1]}**\n\n"
+            f"Click to get in your DM! 👇",
+            reply_markup=keyboard,
+            parse_mode='Markdown'
+        )
+
+    else:
+        # --- Case B: Multiple Results (Deep Link) ---
+        safe_query = text.replace(' ', '_')
+        deep_link = f"https://t.me/{bot.username}?start=q_{safe_query}"
+        
+        keyboard = InlineKeyboardMarkup([[ 
+            InlineKeyboardButton(
+                f"📋 View {len(movies)} Results", 
+                url=deep_link
+            )
+        ]])
+        
+        msg = await update.message.reply_text(
+            f"🔍 Found **{len(movies)} movies** for `{text}`\n\n"
+            f"Click to select! 👇",
+            reply_markup=keyboard,
+            parse_mode='Markdown'
+        )
+        
+        # ✅ FIXED: Using 'schedule_delete' which exists in your code
+        schedule_delete(context, update.effective_chat.id, [msg.message_id], 120)
 
 async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Handle inline button callbacks - INCLUDING MOVIE SELECTION"""
