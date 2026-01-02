@@ -67,8 +67,8 @@ FILMFYBOX_CHANNEL_URL = os.environ.get('FILMFYBOX_CHANNEL_URL', 'https://t.me/Fi
 from telegram import ChatMember  # ✅ Add this import
 
 # ==================== FORCE JOIN CONFIG ====================
-REQUIRED_CHANNEL_ID = os.environ.get('REQUIRED_CHANNEL_ID', '-1001003460387180')
-REQUIRED_GROUP_ID = os.environ.get('REQUIRED_GROUP_ID', '-1003330141433')
+REQUIRED_CHANNEL_ID = os.environ.get('REQUIRED_CHANNEL_ID', '-1003330141433')
+REQUIRED_GROUP_ID = os.environ.get('REQUIRED_GROUP_ID', '-1003460387180')
 CHANNEL_URL = os.environ.get('CHANNEL_URL', 'https://t.me/FilmFyBoxMoviesHD')
 GROUP_URL = os.environ.get('GROUP_URL', 'https://t.me/FlimfyBox')
 FORCE_JOIN_ENABLED = os.environ.get('FORCE_JOIN_ENABLED', 'true').lower() == 'true'
