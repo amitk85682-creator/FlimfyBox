@@ -18,6 +18,7 @@ import sys
 import re
 background_tasks = set()
 from bs4 import BeautifulSoup
+from typing import Optional, Dict, List, Tuple, Any  # ✅ Add these
 import telegram
 import psycopg2
 from typing import Optional
@@ -62,7 +63,19 @@ ADMIN_USER_ID = int(os.environ.get('ADMIN_USER_ID', 0))
 GROUP_CHAT_ID = os.environ.get('GROUP_CHAT_ID')
 ADMIN_CHANNEL_ID = os.environ.get('ADMIN_CHANNEL_ID')
 # Channel URL for the "Join" button
-FILMFYBOX_CHANNEL_URL = os.environ.get('FILMFYBOX_CHANNEL_URL', 'http://t.me/filmfybox')
+FILMFYBOX_CHANNEL_URL = os.environ.get('FILMFYBOX_CHANNEL_URL', 'https://t.me/FilmFyBoxMoviesHD')
+from telegram import ChatMember  # ✅ Add this import
+
+# ==================== FORCE JOIN CONFIG ====================
+REQUIRED_CHANNEL_ID = os.environ.get('REQUIRED_CHANNEL_ID', '-1001003460387180')
+REQUIRED_GROUP_ID = os.environ.get('REQUIRED_GROUP_ID', '-1003330141433')
+CHANNEL_URL = os.environ.get('CHANNEL_URL', 'https://t.me/FilmFyBoxMoviesHD')
+GROUP_URL = os.environ.get('GROUP_URL', 'https://t.me/FlimfyBox')
+FORCE_JOIN_ENABLED = os.environ.get('FORCE_JOIN_ENABLED', 'true').lower() == 'true'
+
+# Verified users cache - user_id:  (timestamp, verification_result)
+verified_users:  Dict[int, Tuple[datetime, Dict]] = {}
+VERIFICATION_CACHE_TIME = int(os.environ.get('VERIFICATION_CACHE_TIME', '3600'))  # 1 Hour
 
 
 # Rate limiting dictionary
@@ -551,6 +564,114 @@ def get_movies_fast_sql(query, limit=5):
                 conn.close()
             except:
                 pass
+
+# ==================== MEMBERSHIP CHECK (FORCE JOIN) ====================
+async def is_user_member(context, user_id: int, force_fresh: bool = False) -> Dict[str, Any]:
+    """
+    Check if user is member of channel and group. 
+    Returns dict with verification status and cache info.
+    """
+    
+    if not FORCE_JOIN_ENABLED: 
+        return {'is_member': True, 'channel':  True, 'group': True, 'error': None}
+    
+    current_time = datetime.now()
+    
+    # Check cache (unless force_fresh is True)
+    if not force_fresh and user_id in verified_users:
+        last_checked, cached = verified_users[user_id]
+        if (current_time - last_checked).total_seconds() < VERIFICATION_CACHE_TIME:
+            logger.info(f"Cache hit for user {user_id}")
+            return cached
+    
+    result = {
+        'is_member': False,
+        'channel': False,
+        'group': False,
+        'channel_status': 'unknown',
+        'group_status':  'unknown',
+        'error': None
+    }
+    
+    # Valid member statuses
+    VALID_MEMBER_STATUSES = [
+        ChatMember.MEMBER,
+        ChatMember.ADMINISTRATOR,
+        ChatMember.OWNER,
+        'member',
+        'administrator',
+        'creator'
+    ]
+    
+    # ========== CHECK CHANNEL ==========
+    try:
+        channel_member = await context.bot.get_chat_member(
+            chat_id=REQUIRED_CHANNEL_ID,
+            user_id=user_id
+        )
+        status = channel_member.status
+        result['channel_status'] = str(status)
+        result['channel'] = status in VALID_MEMBER_STATUSES
+            
+    except Exception as e:
+        result['channel_status'] = f'error: {e}'
+        logger.error(f"Channel check error:  {e}")
+        result['channel'] = False
+    
+    # ========== CHECK GROUP ==========
+    try:
+        group_member = await context.bot.get_chat_member(
+            chat_id=REQUIRED_GROUP_ID,
+            user_id=user_id
+        )
+        status = group_member.status
+        result['group_status'] = str(status)
+        result['group'] = status in VALID_MEMBER_STATUSES
+            
+    except Exception as e:
+        result['group_status'] = f'error: {e}'
+        logger.error(f"Group check error: {e}")
+        result['group'] = False
+    
+    # ========== FINAL RESULT ==========
+    result['is_member'] = result['channel'] and result['group']
+    
+    # Update cache
+    verified_users[user_id] = (current_time, result)
+    
+    return result
+
+
+def get_join_keyboard() -> InlineKeyboardMarkup:
+    """Join buttons keyboard"""
+    return InlineKeyboardMarkup([
+        [
+            InlineKeyboardButton("📢 Join Channel", url=CHANNEL_URL),
+            InlineKeyboardButton("💬 Join Group", url=GROUP_URL)
+        ],
+        [InlineKeyboardButton("✅ Joined Both - Verify", callback_data="verify")]
+    ])
+
+
+def get_join_message(channel_status: bool, group_status: bool) -> str:
+    """Generate join message based on what's missing"""
+    if not channel_status and not group_status:
+        missing = "Channel और Group दोनों"
+    elif not channel_status: 
+        missing = "Channel"
+    else:
+        missing = "Group"
+    
+    return (
+        f"🚫 **Your File is ready**\n\n"
+        f"🚫 **But Access Denied**\n\n"
+        f"आपने {missing} को join नहीं किया है!\n\n"
+        f"📢 Channel: {'✅' if channel_status else '❌'}\n"
+        f"💬 Group: {'✅' if group_status else '❌'}\n\n"
+        f"दोनों को join करके, फिर **Verify** button दबाएं 👇"
+    )
+
+
 # ==================== STORE USER REQUEST (fixed) ====================
 def store_user_request(user_id, username, first_name, movie_title, group_id=None, message_id=None):
     """Store user request in database. Uses ON CONFLICT DO UPDATE to refresh timestamp for exact duplicates."""
@@ -656,8 +777,13 @@ Time: {datetime.now().strftime('%Y-%m-%d %I:%M %p')}
     except Exception as e:
         logger.error(f"Error sending admin notification: {e}")
 
+# ==================== AUTO DELETE HELPER FUNCTIONS ====================
+
 async def delete_messages_after_delay(context, chat_id, message_ids, delay=60):
-    """Delete messages after specified delay"""
+    """
+    Delete messages after specified delay
+    NOTE: Ye function schedule_delete se PHELE aana chahiye.
+    """
     try:
         await asyncio.sleep(delay)
         for msg_id in message_ids:
@@ -665,9 +791,22 @@ async def delete_messages_after_delay(context, chat_id, message_ids, delay=60):
                 await context.bot.delete_message(chat_id=chat_id, message_id=msg_id)
                 logger.info(f"✅ Deleted message {msg_id} from chat {chat_id}")
             except Exception as e:
-                logger.error(f"Failed to delete message {msg_id}: {e}")
+                # Agar message pehle hi delete ho gaya hai to ignore karein
+                pass
     except Exception as e:
         logger.error(f"Error in delete_messages_after_delay: {e}")
+
+def schedule_delete(context: ContextTypes.DEFAULT_TYPE, chat_id: int, message_ids: List[int], delay: int = 120):
+    """Schedule auto deletion of messages with task tracking"""
+    # Task create karke variable me store karein
+    task = asyncio.create_task(delete_messages_after_delay(context, chat_id, message_ids, delay))
+    
+    # Task ko background_tasks set me add karein (Taaki Python isse kill na kare)
+    background_tasks.add(task)
+    
+    # Jab task khatam ho jaye, use set se hata dein
+    task.add_done_callback(background_tasks.discard)
+
 
 async def notify_users_for_movie(context: ContextTypes.DEFAULT_TYPE, movie_title, movie_url_or_file_id):
     """Notify users who requested a movie — add caption when sending media."""
@@ -678,9 +817,9 @@ async def notify_users_for_movie(context: ContextTypes.DEFAULT_TYPE, movie_title
 
     caption_text = (
     f"🎬 <b>{movie_title}</b>\n\n"
-    "🔗 <b>JOIN »</b> FilmfyBox (http://t.me/filmfybox)\n\n"
+    "🔗 <b>JOIN »</b> FilmfyBox (https://t.me/FilmFyBoxMoviesHD)\n\n"
     "🔹 <b>Please drop the movie name, and I’ll find it for you as soon as possible. 🎬✨👇</b>\n"
-    "🔹 <b>FlimfyBox Chat (https://t.me/Filmfybox002)</b>"
+    "🔹 <b>FlimfyBox Chat (https://t.me/FlimfyBox)</b>"
 )
     # Keyboard with a "Join Channel" button, to be attached to the media message
     join_channel_keyboard = InlineKeyboardMarkup([[
@@ -991,7 +1130,6 @@ def create_quality_selection_keyboard(movie_id, title, qualities):
     return InlineKeyboardMarkup(keyboard)
 
 
-    return InlineKeyboardMarkup(keyboard)
 # ==================== HELPER FUNCTION (FIXED FOR QUALITY CHOICE) ====================
 async def send_movie_to_user(update: Update, context: ContextTypes.DEFAULT_TYPE, movie_id: int, title: str, url: Optional[str] = None, file_id: Optional[str] = None):
     """
@@ -1037,9 +1175,9 @@ async def send_movie_to_user(update: Update, context: ContextTypes.DEFAULT_TYPE,
         name = title  # Use 'title' from the function arguments for the caption
         caption_text = (
             f"🎬 <b>{name}</b>\n\n"
-            "🔗 <b>JOIN »</b> <a href='http://t.me/filmfybox'>FilmfyBox</a>\n\n"
+            "🔗 <b>JOIN »</b> <a href='https://t.me/FilmFyBoxMoviesHD'>FilmfyBox</a>\n\n"
             "🔹 <b>Please drop the movie name, and I’ll find it for you as soon as possible. 🎬✨👇</b>\n"
-            "🔹 <b><a href='https://t.me/Filmfybox002'>FlimfyBox Chat</a></b>"
+            "🔹 <b><a href='https://t.me/FlimfyBox'>FlimfyBox Chat</a></b>"
         )
         
         # Keyboard with a "Join Channel" button, to be attached to the media message
@@ -1194,26 +1332,36 @@ async def deliver_movie_on_start(update: Update, context: ContextTypes.DEFAULT_T
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """
-    Start command handler. 
-    Handles:
-    1. Normal start (/start)
-    2. Deep links for direct movie delivery (/start movie_123)
-    3. Auto-search deep links from channel (/start q_MovieName)
+    Start command handler with force join check.
     """
     try:
-        # Check for deep link payload
+        user_id = update.effective_user.id
+        chat_id = update.effective_chat.id
+        
+        # Check for deep link payload FIRST
         if context.args and len(context.args) > 0 and context.args[0]:
             payload = context.args[0]
             
             # --- CASE 1: DIRECT MOVIE ID (e.g., movie_123) ---
             if payload.startswith("movie_"):
                 try:
+                    # FIX: Removed space in split
                     movie_id = int(payload.split('_')[1])
                     
-                    # ✅ FIX: Task create karein aur 'update' pass karein
-                    task = asyncio.create_task(deliver_movie_on_start(update, context, movie_id))
+                    # ✅ FORCE JOIN CHECK (Fresh Check)
+                    check = await is_user_member(context, user_id, force_fresh=True)
                     
-                    # Task ko global set me add karein (Garbage Collection rokne ke liye)
+                    if not check['is_member']:
+                        msg = await update.message.reply_text(
+                            get_join_message(check['channel'], check['group']),
+                            reply_markup=get_join_keyboard(),
+                            parse_mode='Markdown'
+                        )
+                        schedule_delete(context, chat_id, [msg.message_id], 120)
+                        return MAIN_MENU
+                    
+                    # User is member - deliver movie
+                    task = asyncio.create_task(deliver_movie_on_start(update, context, movie_id))
                     background_tasks.add(task)
                     task.add_done_callback(background_tasks.discard)
                     
@@ -1226,23 +1374,33 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
             
             # --- CASE 2: AUTO SEARCH (e.g., q_Family_Man) ---
             elif payload.startswith("q_"):
-                try:
-                    # Decode query: q_Family_Man -> Family Man
+                try: 
                     query_text = payload.replace("q_", "", 1)
                     query_text = query_text.replace("_", " ")
                     query_text = " ".join(query_text.split())
                     
                     logger.info(f"Deep link search query: {query_text}")
                     
+                    # ✅ FORCE JOIN CHECK (Fresh Check)
+                    check = await is_user_member(context, user_id, force_fresh=True)
+                    
+                    if not check['is_member']: 
+                        msg = await update.message.reply_text(
+                            get_join_message(check['channel'], check['group']),
+                            reply_markup=get_join_keyboard(),
+                            parse_mode='Markdown'
+                        )
+                        schedule_delete(context, chat_id, [msg.message_id], 120)
+                        return MAIN_MENU
+                    
                     if not query_text or not query_text.strip():
                         await update.message.reply_text("❌ Invalid search query.")
                         return MAIN_MENU
                     
-                    # ✅ FIXED: Direct search instead of setting message.text
+                    # Search for movies
                     movies_found = get_movies_from_db(query_text, limit=10)
                     
-                    if not movies_found:
-                        # Movie not found
+                    if not movies_found: 
                         keyboard = InlineKeyboardMarkup([
                             [InlineKeyboardButton("🙋 Request This Movie", callback_data=f"request_{query_text[:50]}")]
                         ])
@@ -1253,13 +1411,11 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
                         return MAIN_MENU
                     
                     elif len(movies_found) == 1:
-                        # Single result - send directly
                         movie_id, title, url, file_id = movies_found[0]
                         await send_movie_to_user(update, context, movie_id, title, url, file_id)
                         return MAIN_MENU
                     
                     else:
-                        # Multiple results - show selection
                         context.user_data['search_results'] = movies_found
                         context.user_data['search_query'] = query_text
                         
@@ -1271,7 +1427,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
                         )
                         return MAIN_MENU
                     
-                except Exception as e:
+                except Exception as e: 
                     logger.error(f"Error in q_ deep link: {e}")
                     await update.message.reply_text("❌ Search error. Please type movie name manually.")
                     return MAIN_MENU
@@ -1279,19 +1435,54 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     except Exception as e:
         logger.error(f"Error in start: {e}")
 
-    # --- NORMAL WELCOME MESSAGE ---
-    welcome_text = """
-📨 Sᴇɴᴅ Mᴏᴠɪᴇ Oʀ Sᴇʀɪᴇs Nᴀᴍᴇ ᴀɴᴅ Yᴇᴀʀ Aꜱ Pᴇʀ Gᴏᴏɢʟᴇ Sᴘᴇʟʟɪɴɢ..!! 👍
-
-⚠️ Exᴀᴍᴘʟᴇ Fᴏʀ Mᴏᴠɪᴇ 👇
-👉 Jailer 2023
-
-⚠️ Exᴀᴍᴘʟᴇ Fᴏʀ WᴇʙSᴇʀɪᴇs 👇
-👉 Stranger Things S02
-
-⚠️ ᴅᴏɴ'ᴛ ᴀᴅᴅ ᴇᴍᴏᴊɪꜱ ᴀɴᴅ ꜱʏᴍʙᴏʟꜱ ɪɴ ᴍᴏᴠɪᴇ ɴᴀᴍᴇ, ᴜꜱᴇ ʟᴇᴛᴛᴇʀꜱ ᴏɴʟʏ..!! ❌
-"""
-    await update.message.reply_text(welcome_text, reply_markup=get_main_keyboard())
+    # --- NORMAL WELCOME MESSAGE (with FSUB check) ---
+    try:
+        # ✅ FORCE JOIN CHECK for new users
+        check = await is_user_member(context, user_id, force_fresh=True)
+        
+        if not check['is_member']:
+            # Not a member - show join prompt
+            await update.message.reply_text(
+                get_join_message(check['channel'], check['group']),
+                reply_markup=get_join_keyboard(),
+                parse_mode='Markdown'
+            )
+            return MAIN_MENU
+        
+        # Member - show welcome
+        bot = await context.bot.get_me()
+        
+        keyboard = InlineKeyboardMarkup([
+            [InlineKeyboardButton("➕ Add to Group", url=f"https://t.me/{bot.username}?startgroup=true")],
+            [
+                InlineKeyboardButton("📢 Channel", url=CHANNEL_URL),
+                InlineKeyboardButton("💬 Group", url=GROUP_URL)
+            ]
+        ])
+        
+        welcome = (
+            "🎬 **FilmfyBox**\n"
+            "━━━━━━━━━━━━━━━━━━━━\n\n"
+            "🔍 Type movie or series name to search!\n\n"
+            "📝 **Example:** `Avengers Endgame`\n\n"
+            "⚡ **Features:**\n"
+            "• Fast fuzzy search\n"
+            "• Multiple quality options\n"
+            "• Auto-delete for privacy\n\n"
+            "Type any movie name to start! 👇"
+        )
+        
+        await update.message.reply_text(
+            welcome,
+            reply_markup=keyboard,
+            parse_mode='Markdown'
+        )
+    except Exception as e:
+        logger.error(f"Start command error: {e}")
+        await update.message.reply_text(
+            "🎬 Welcome to FilmfyBox!\n\nType any movie name to search."
+        )
+    
     return MAIN_MENU
 
 async def main_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -1359,10 +1550,25 @@ Just use the buttons below to navigate!
         return MAIN_MENU
 
 async def search_movies(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Handle movie search with multiple results support"""
-    try:
+    """Handle movie search with FSUB check"""
+    try: 
+        user_id = update.effective_user.id
+        chat_id = update.effective_chat.id
+        
+        # ✅ MEMBERSHIP CHECK (Use Cache)
+        check = await is_user_member(context, user_id, force_fresh=False)
+        
+        if not check['is_member']:
+            msg = await update.message.reply_text(
+                get_join_message(check['channel'], check['group']),
+                reply_markup=get_join_keyboard(),
+                parse_mode='Markdown'
+            )
+            schedule_delete(context, chat_id, [msg.message_id], 120)
+            return MAIN_MENU
+        
         # Rate limiting
-        if not await check_rate_limit(update.effective_user.id):
+        if not await check_rate_limit(user_id):
             await update.message.reply_text("⚠️ Please wait a moment before searching again.")
             return SEARCHING
 
@@ -1374,102 +1580,54 @@ async def search_movies(update: Update, context: ContextTypes.DEFAULT_TYPE):
         movies_found = get_movies_from_db(search_query, limit=10)
 
         if not movies_found:
-            # --- NEW CHANGE START ---
-            # Agar chat private nahi hai (yani Group hai), to chup chap return kar jao.
-            # Group me koi msg nahi jayega.
+            # Agar Private chat nahi hai (Group hai), to return kar jao (Silent Mode)
             if update.effective_chat.type != "private":
                 return MAIN_MENU
-            # --- NEW CHANGE END ---
 
-            # Movie not found - store request logic (Sirf Private chat me ya logic chalega ab)
+            # Private Chat Not Found Logic
             user = update.effective_user
             store_user_request(
                 user.id, user.username, user.first_name, user_message,
-                update.effective_chat.id if update.effective_chat.type != "private" else None,
-                update.message.message_id
+                None, update.message.message_id
             )
             
-            # --- 1. Send a single, hardcoded GIF ---
-            try:
-                gif_msg = await context.bot.send_animation(
-                    chat_id=update.effective_chat.id,
-                    animation='CgACAgQAAxkBAAECz0ppEaLwgDbNfPPFl5lgtFjjmztKKgAC5wIAAmaoDVMH7bkdAqNVnDYE', # Hardcoded GIF ID
-                    caption="🎬 **Movie Search Tips** 🔍",
-                    parse_mode='Markdown'
-                )
-            except Exception as e:
-                logger.error(f"Failed to send hardcoded animation: {e}")
-
-            # --- 2. Request button ---
-            try:
-                 request_btn_msg = await update.message.reply_text(
-                    f"😔 Sorry, '{user_message}' is not in my collection right now. Would you like to request it?",
-                    reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("✅ Yes, Request It", callback_data=f"request_{user_message[:50]}")]]))
-            except: pass
-
-            # --- 3. Search Tip message ---
-            error_msg = """
-Mᴏᴠɪᴇ ᴋɪ sᴘᴇʟʟɪɴɢ Gᴏᴏɢʟᴇ ᴘᴀʀ sᴇᴀʀᴄʜ ᴋᴀʀᴋᴇ, ᴄᴏᴘʏ ᴋᴀʀᴇ, ᴜsᴋᴇ ʙᴀᴀᴅ ʏᴀʜᴀ́ ᴛʏᴘᴇ/PAST ᴋᴀʀᴇ́. ✔️
-
-Bᴀs ᴍᴏᴠɪᴇ ᴋᴀ ɴᴀᴍᴇ + ʏᴇᴀʀ (ᴏʀ Sᴇʀɪᴇs Sᴇᴀsᴏɴ/Eᴘɪsᴏᴅᴇ) ʟɪᴋʜᴇ́, ᴜsᴋᴇ ᴀᴀɢᴇ ᴘɪᴄʜʜᴇ ᴋᴜᴄʜʜ ʙʜɪ ɴᴀ ʟɪᴋʜᴇ́. ❌
-
----
-**📝 Example:**
-**Sᴀʜɪ ʜᴀɪ! 👇**
-👉 `KGF 2`
-👉 `Asur S01 E03`
-
-**Gᴀʟᴀᴛ ʜᴀɪ! 🙅**
-❌ `KGF 2 Movie`
-❌ `Asur Season 3 Download`
----
-
-**Dᴏɴ’T ᴀᴅᴅ Eᴍᴏᴊɪs ᴀɴᴅ Sʏᴍʙᴏʟs ɪɴ Mᴏᴠɪᴇ Nᴀᴍᴇs!** ⚠️
-"""
-            try:
-                await update.message.reply_text(error_msg, parse_mode='Markdown')
-            except: pass
-            
+            await update.message.reply_text(
+                f"😔 Sorry, '{user_message}' is not in my collection.\nRequest sent to admin!",
+                reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("✅ Request Sent", callback_data="dummy")]])
+            )
             return MAIN_MENU
 
         elif len(movies_found) == 1:
             movie_id, title, url, file_id = movies_found[0]
             
-            # CHECK: If there are multiple qualities (e.g. Stream Link + 720p), show menu instead of auto-sending
+            # Check for multiple qualities
             qualities = get_all_movie_qualities(movie_id)
             
             if len(qualities) > 1:
-                # Force menu display
                 context.user_data['selected_movie_data'] = {
-                    'id': movie_id,
-                    'title': title,
-                    'qualities': qualities
+                    'id': movie_id, 'title': title, 'qualities': qualities
                 }
-                selection_text = f"✅ **{title}** found!\n\n⬇️ **Please choose an option:**"
+                selection_text = f"✅ **{title}** found!\n\n⬇️ **Choose quality:**"
                 keyboard = create_quality_selection_keyboard(movie_id, title, qualities)
                 await update.message.reply_text(selection_text, reply_markup=keyboard, parse_mode='Markdown')
             else:
-                # Only 1 option exists, send it directly
                 await send_movie_to_user(update, context, movie_id, title, url, file_id)
 
         else:
-            # Multiple movies found - show selection menu
+            # Multiple movies found
             context.user_data['search_results'] = movies_found
             context.user_data['search_query'] = user_message
 
-            selection_text = f"🎬 **Found {len(movies_found)} movies matching '{user_message}'**\n\nPlease select the movie you want:"
+            selection_text = f"🎬 **Found {len(movies_found)} movies matching '{user_message}'**"
             keyboard = create_movie_selection_keyboard(movies_found, page=0)
-
             await update.message.reply_text(selection_text, reply_markup=keyboard, parse_mode='Markdown')
 
-        await update.message.reply_text("Ab Aap Aage kya karana chaahenge?", reply_markup=get_main_keyboard())
         return MAIN_MENU
 
     except Exception as e:
         logger.error(f"Error in search movies: {e}")
-        # Yahan bhi check laga sakte hain taki error aane par bhi group me msg na jaye
         if update.effective_chat.type == "private":
-            await update.message.reply_text("Sorry, something went wrong. Please try again.")
+            await update.message.reply_text("Sorry, something went wrong.")
         return MAIN_MENU
 # ==================== REQUEST MOVIE (updated) ====================
 async def request_movie(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -1554,7 +1712,6 @@ async def request_movie(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def handle_group_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """
     Handle messages in groups using FAST SQL Search.
-    Agar movie database me hai to reply karega, nahi to chup rahega.
     """
     if not update.message or not update.message.text:
         return
@@ -1562,78 +1719,104 @@ async def handle_group_message(update: Update, context: ContextTypes.DEFAULT_TYP
     text = update.message.text.strip()
     bot = await context.bot.get_me()
     
-    # 1. Commands ignore karo
-    if text.startswith('/'):
+    # 1. Commands aur Tag ignore karein
+    if text.startswith('/') or len(text) < 2:
         return
     
-    # 2. Agar user ne tag kiya hai to tag hata do
     if f"@{bot.username}" in text:
         text = text.replace(f"@{bot.username}", "").strip()
 
-    # 3. Bahut chote words ignore karo
-    if len(text) < 2:
-        return
-
-    # 4. 🚀 FAST SEARCH CALL (Sirf SQL Check)
+    # 2. 🚀 FAST SEARCH CALL
+    # Ensure get_movies_fast_sql function exists in your file
     movies = get_movies_fast_sql(text, limit=10)
 
     if not movies:
-        # 🤫 Agar movie nahi mili, to YAHIN RUK JAO.
-        # Bot kuch reply nahi karega.
-        return
+        return # Movie nahi mili to shant raho
 
-    # 5. Result Handling
     user_id = update.effective_user.id
+    chat_id = update.effective_chat.id
+    msg = None # Variable initialization
 
     if len(movies) == 1:
-        # --- Case A: Single Result (Direct Button) ---
+        # --- Single Result ---
         m = movies[0]
-        # Movie Tuple: (id, title, url, file_id)
-        
         keyboard = InlineKeyboardMarkup([[ 
-            InlineKeyboardButton(
-                "📥 Get in DM", 
-                callback_data=f"g_{m[0]}_{user_id}"
-            )
+            InlineKeyboardButton("📥 Get in DM", callback_data=f"g_{m[0]}_{user_id}")
         ]])
         
-        is_series_bool = is_series(m[1]) if 'is_series' in globals() else False
+        # Is series check logic safe
+        is_series_bool = False
+        if 'is_series' in globals():
+             is_series_bool = is_series(m[1])
+
         emoji = "📺" if is_series_bool else "🎬"
 
-        await update.message.reply_text(
-            f"{emoji} **{m[1]}**\n\n"
-            f"Click to get in your DM! 👇",
+        msg = await update.message.reply_text(
+            f"{emoji} **{m[1]}**\n\nClick to get in your DM! 👇",
             reply_markup=keyboard,
             parse_mode='Markdown'
         )
 
     else:
-        # --- Case B: Multiple Results (Deep Link) ---
+        # --- Multiple Results ---
         safe_query = text.replace(' ', '_')
         deep_link = f"https://t.me/{bot.username}?start=q_{safe_query}"
         
         keyboard = InlineKeyboardMarkup([[ 
-            InlineKeyboardButton(
-                f"📋 View {len(movies)} Results", 
-                url=deep_link
-            )
+            InlineKeyboardButton(f"📋 View {len(movies)} Results", url=deep_link)
         ]])
         
         msg = await update.message.reply_text(
-            f"🔍 Found **{len(movies)} movies** for `{text}`\n\n"
-            f"Click to select! 👇",
+            f"🔍 Found **{len(movies)} movies** for `{text}`\n\nClick to select! 👇",
             reply_markup=keyboard,
             parse_mode='Markdown'
         )
-        
-        # ✅ FIXED: Using 'schedule_delete' which exists in your code
-        schedule_delete(context, update.effective_chat.id, [msg.message_id], 120)
+    
+    # 3. Schedule Auto Delete (Safe Call)
+    if msg:
+        schedule_delete(context, chat_id, [msg.message_id], 120)
 
 async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Handle inline button callbacks - INCLUDING MOVIE SELECTION"""
+    """Handle inline button callbacks"""
     try:
         query = update.callback_query
         await query.answer()
+
+        # ============ VERIFY BUTTON (Force Join) ============
+        if query.data == "verify":
+            await query.answer("🔍 Checking membership.. .", show_alert=True)
+            user_id = query.from_user.id
+            chat_id = query.message.chat.id
+            
+            # FORCE FRESH CHECK - Ignore cache
+            check = await is_user_member(context, user_id, force_fresh=True)
+            
+            if check['is_member']:
+                await query.edit_message_text(
+                    "✅ **Verified Successfully!**\n\n"
+                    "आप अब कोई भी movie search कर सकते हैं!  🎬\n"
+                    "बस movie का नाम type करें 👇",
+                    parse_mode='Markdown'
+                )
+                # Delete verification message after 10 seconds
+                schedule_delete(context, chat_id, [query.message.message_id], 10)
+            else:
+                # Still not joined
+                try:
+                    await query.edit_message_text(
+                        get_join_message(check['channel'], check['group']),
+                        reply_markup=get_join_keyboard(),
+                        parse_mode='Markdown'
+                    )
+                except telegram.error.BadRequest: 
+                    await query.answer(
+                        "❌ आप अभी join नहीं किए हैं!  पहले दोनों को join करें।",
+                        show_alert=True
+                    )
+            return
+
+        # ============ (Rest of your existing button handlers) ============
+        # ... movie selection, quality selection, etc ... 
 
         # --- NEW: Handle "Get Movie" from a group prompt ---
         if query.data.startswith("group_get_"):
