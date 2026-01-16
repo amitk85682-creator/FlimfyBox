@@ -1712,6 +1712,7 @@ async def request_movie(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def handle_group_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """
     Handle messages in groups using FAST SQL Search.
+    Robust against deleted trigger messages.
     """
     if not update.message or not update.message.text:
         return
@@ -1727,7 +1728,6 @@ async def handle_group_message(update: Update, context: ContextTypes.DEFAULT_TYP
         text = text.replace(f"@{bot.username}", "").strip()
 
     # 2. 🚀 FAST SEARCH CALL
-    # Ensure get_movies_fast_sql function exists in your file
     movies = get_movies_fast_sql(text, limit=10)
 
     if not movies:
@@ -1737,6 +1737,7 @@ async def handle_group_message(update: Update, context: ContextTypes.DEFAULT_TYP
     chat_id = update.effective_chat.id
     msg = None # Variable initialization
 
+    # --- Prepare Message Content ---
     if len(movies) == 1:
         # --- Single Result ---
         m = movies[0]
@@ -1750,12 +1751,7 @@ async def handle_group_message(update: Update, context: ContextTypes.DEFAULT_TYP
              is_series_bool = is_series(m[1])
 
         emoji = "📺" if is_series_bool else "🎬"
-
-        msg = await update.message.reply_text(
-            f"{emoji} **{m[1]}**\n\nClick to get in your DM! 👇",
-            reply_markup=keyboard,
-            parse_mode='Markdown'
-        )
+        response_text = f"{emoji} **{m[1]}**\n\nClick to get in your DM! 👇"
 
     else:
         # --- Multiple Results ---
@@ -1766,21 +1762,34 @@ async def handle_group_message(update: Update, context: ContextTypes.DEFAULT_TYP
             InlineKeyboardButton(f"📋 View {len(movies)} Results", url=deep_link)
         ]])
         
+        response_text = f"🔍 Found **{len(movies)} movies** for `{text}`\n\nClick to select! 👇"
+
+    # --- 3. Send Message (Robust Logic) ---
+    try:
+        # Try to reply to the user's message
         msg = await update.message.reply_text(
-            f"🔍 Found **{len(movies)} movies** for `{text}`\n\nClick to select! 👇",
+            response_text,
             reply_markup=keyboard,
             parse_mode='Markdown'
         )
-    
-    # 3. Schedule Auto Delete (Safe Call)
+    except BadRequest as e:
+        # If message to be replied is not found (deleted), send a fresh message
+        if "Message to be replied not found" in str(e):
+            try:
+                msg = await context.bot.send_message(
+                    chat_id=chat_id,
+                    text=response_text,
+                    reply_markup=keyboard,
+                    parse_mode='Markdown'
+                )
+            except Exception as e2:
+                logger.error(f"Failed to send fallback message in group: {e2}")
+        else:
+            logger.error(f"Error replying in group: {e}")
+
+    # 4. Schedule Auto Delete (Safe Call)
     if msg:
         schedule_delete(context, chat_id, [msg.message_id], 120)
-
-async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Handle inline button callbacks"""
-    try:
-        query = update.callback_query
-        await query.answer()
 
         # ============ VERIFY BUTTON (Force Join) ============
         if query.data == "verify":
