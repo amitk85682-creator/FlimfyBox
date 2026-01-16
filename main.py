@@ -1790,9 +1790,16 @@ async def handle_group_message(update: Update, context: ContextTypes.DEFAULT_TYP
     # 4. Schedule Auto Delete (Safe Call)
     if msg:
         schedule_delete(context, chat_id, [msg.message_id], 120)
+
+async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Handle inline button callbacks"""
+    try:
+        query = update.callback_query
+        await query.answer()
+
         # ============ VERIFY BUTTON (Force Join) ============
         if query.data == "verify":
-            await query.answer("🔍 Checking membership.. .", show_alert=True)
+            await query.answer("🔍 Checking membership...", show_alert=True)
             user_id = query.from_user.id
             chat_id = query.message.chat.id
             
@@ -1802,7 +1809,7 @@ async def handle_group_message(update: Update, context: ContextTypes.DEFAULT_TYP
             if check['is_member']:
                 await query.edit_message_text(
                     "✅ **Verified Successfully!**\n\n"
-                    "आप अब कोई भी movie search कर सकते हैं!  🎬\n"
+                    "आप अब कोई भी movie search कर सकते हैं! 🎬\n"
                     "बस movie का नाम type करें 👇",
                     parse_mode='Markdown'
                 )
@@ -1818,7 +1825,7 @@ async def handle_group_message(update: Update, context: ContextTypes.DEFAULT_TYP
                     )
                 except telegram.error.BadRequest: 
                     await query.answer(
-                        "❌ आप अभी join नहीं किए हैं!  पहले दोनों को join करें।",
+                        "❌ आप अभी join नहीं किए हैं! पहले दोनों को join करें।",
                         show_alert=True
                     )
             return
