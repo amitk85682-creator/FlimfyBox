@@ -41,6 +41,7 @@ from datetime import datetime, timedelta
 from fuzzywuzzy import process, fuzz
 from urllib.parse import urlparse, urlunparse, quote
 from collections import defaultdict
+from telegram.error import BadRequest
 
 # ==================== LOGGING SETUP ====================
 logging.basicConfig(
@@ -1708,7 +1709,6 @@ async def request_movie(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return REQUESTING
 
 # 👇👇👇 PURANE 'handle_group_mention' KO REPLACE KARKE YE PASTE KARO 👇👇👇
-
 async def handle_group_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """
     Handle messages in groups using FAST SQL Search.
@@ -1774,7 +1774,6 @@ async def handle_group_message(update: Update, context: ContextTypes.DEFAULT_TYP
         )
     except Exception as e:
         # If message to be replied is not found (deleted), send a fresh message
-        # We catch generic Exception here to be safe, but check for BadRequest string
         if "Message to be replied not found" in str(e):
             try:
                 msg = await context.bot.send_message(
@@ -1791,7 +1790,6 @@ async def handle_group_message(update: Update, context: ContextTypes.DEFAULT_TYP
     # 4. Schedule Auto Delete (Safe Call)
     if msg:
         schedule_delete(context, chat_id, [msg.message_id], 120)
-
         # ============ VERIFY BUTTON (Force Join) ============
         if query.data == "verify":
             await query.answer("🔍 Checking membership.. .", show_alert=True)
