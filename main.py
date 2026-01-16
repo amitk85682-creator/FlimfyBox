@@ -1772,8 +1772,9 @@ async def handle_group_message(update: Update, context: ContextTypes.DEFAULT_TYP
             reply_markup=keyboard,
             parse_mode='Markdown'
         )
-    except BadRequest as e:
+    except Exception as e:
         # If message to be replied is not found (deleted), send a fresh message
+        # We catch generic Exception here to be safe, but check for BadRequest string
         if "Message to be replied not found" in str(e):
             try:
                 msg = await context.bot.send_message(
